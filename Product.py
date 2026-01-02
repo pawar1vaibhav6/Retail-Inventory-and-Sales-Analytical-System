@@ -24,6 +24,22 @@ def new_product():
     except:
         print("Product Already Exists")
 
+def check_product(pid):
+    try:
+        query="Select * from Products where product_id=?"
+        cursor.execute(query,(pid,))
+        rows=cursor.fetchall()
+        row=rows[0]
+        product={
+            "Product":row[1],
+            "Category":row[2],
+            "Price":row[3],
+            "Stock":row[4]
+        }
+        print(product)
+    except Exception as e:
+        print(e)
+
 def price_increase():
     pid=int(input("Product Id:"))
     new_price=int(input("New Price:"))
