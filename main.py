@@ -1,19 +1,21 @@
 import Product as pi
 import Customers as c
 import Sales as s
+import Analysis as a
 
 def main():
     print(
-        "1.Purchase\n"
-        "2.Add New Product\n"
-        "3.Check For Product\n"
-          "4.Update Price of Existing Product\n"
-          "5.Update Stock of Existing Product\n"
-          "6.Add New Customers\n"
-          "7.Exit"
+        "1. Purchase\n"
+        "2. Add New Product\n"
+        "3. Check For Product\n"
+          "4. Update Price of Existing Product\n"
+          "5. Update Stock of Existing Product\n"
+          "6. Add New Customers\n"
+          "7. Analysis\n"
+          "8. Exit"
           )
     try:
-        options=int(input("Choose From above(1,2,3,4,5):"))
+        options=int(input("Choose From above(1,2,3,4,5,6,7,8):"))
     except ValueError:
         print("Enter a valid number")
         return
@@ -31,6 +33,13 @@ def main():
     elif options==6:
         c.new_customers()
     elif options==7:
+        print(
+            "1. Low Stock"
+        )
+        opt=int(input("Choose From above(1):"))
+        if opt==1:
+            a.low_stock()
+    elif options==8:
         print("Thank you for visiting")
     else:
         print("Invalid Input")
