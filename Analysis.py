@@ -26,3 +26,17 @@ def low_stock():
     else:
         print("Low stock products:")
         print(df)
+
+def monthly_sale():
+    query="""Select datename(M,datepart(M,Date)) as Month,sum(total_amount) as Total_sales from Sales
+                group by datepart(M,Date)"""
+    
+    df=pd.read_sql_query(query,conn)
+    print(df)
+
+def daily_sale():
+    query="""select FORMAT(date,'dd-MM-yyyy') as [Date] ,sum(total_amount) as [Total Sales] from Sales
+            group by FORMAT(date,'dd-MM-yyyy')"""
+    
+    df=pd.read_sql_query(query,conn)
+    print(df)
