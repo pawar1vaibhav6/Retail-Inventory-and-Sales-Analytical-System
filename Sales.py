@@ -35,7 +35,7 @@ def sale(customer_id,total_amount,bill_items):
 
         query2="""Select s.product_id,p_name,price,total_amount 
                     from Products p join Sales s on p.product_id=s.product_id 
-                    where s.product_id=? and customer_id=? and quantity=? """
+                    where s.product_id=? and customer_id=? and quantity=? and datediff(n,Date,getdate())<=10"""
         cursor.execute(query2,(product_id,customer_id,quantity))
         row=cursor.fetchone()
         bill_items.append({
