@@ -40,3 +40,10 @@ def daily_sale():
     
     df=pd.read_sql_query(query,conn)
     print(df)
+
+def weekly_sale():
+    query="""select datepart(wk,date) as [Week] ,sum(total_amount) as [Total Sales] from Sales
+            group by datepart(wk,date)"""
+    
+    df=pd.read_sql_query(query,conn)
+    print(df)

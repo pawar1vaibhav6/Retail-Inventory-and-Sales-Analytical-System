@@ -49,7 +49,8 @@ def main():
             print(
                 "1. Low Stock\n"
                 "2. Month Wise Sale\n"
-                "3. Daily Sales"
+                "3. Daily Sales\n"
+                "4. Weekly Sales"
             )
             opt=int(input("Choose From above(1,2):"))
             if opt==1:
@@ -58,6 +59,8 @@ def main():
                 a.monthly_sale()
             elif opt==3:
                 a.daily_sale()
+            elif opt==4:
+                a.weekly_sale()
         elif options==8:
             print("Thank you for visiting")
             break
