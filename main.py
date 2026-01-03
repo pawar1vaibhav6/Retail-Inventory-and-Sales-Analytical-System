@@ -22,10 +22,12 @@ def main():
     if options==1:
         customer_id=int(input("Customer_id:"))
         total_amount=0
+        bill_items=[]
         while True:
-            total_amount=s.sale(customer_id,total_amount)
+            total_amount,bill=s.sale(customer_id,total_amount,bill_items)
             user_input=input("Press q to exit")
             if user_input.lower()=="q":
+                print(bill)
                 print(f"Total Payable amount:{total_amount}")
                 break
             else:

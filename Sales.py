@@ -1,4 +1,5 @@
 import pyodbc
+import pandas as pd
 
 conn = pyodbc.connect(
     "Driver={ODBC Driver 18 for SQL Server};"
@@ -10,7 +11,7 @@ conn = pyodbc.connect(
 
 cursor=conn.cursor()
 
-def sale(customer_id,total_amount):
+def sale(customer_id,total_amount,bill_items):
     product_id=int(input("Product_id:"))
     quantity=int(input("Quantity:"))
 
@@ -31,4 +32,21 @@ def sale(customer_id,total_amount):
         query1="Update Products set Stock_quantity=Stock_quantity - ? where product_id=?"
         cursor.execute(query1,(quantity,product_id))
         conn.commit()
-        return total_amount
+
+        query2="""Select s.product_id,p_name,price,total_amount 
+                    from Products p join Sales s on p.product_id=s.product_id 
+                    where s.product_id=? and customer_id=? and quantity=? """
+        cursor.execute(query2,(product_id,customer_id,quantity))
+        row=cursor.fetchone()
+        bill_items.append({
+            "Product Id":product_id,
+            "Product":row[1],
+            "Price":row[2],
+            "Quantity":quantity,
+            "Total":row[3]
+        })
+        
+        df=pd.DataFrame(bill_items)
+
+        return total_amount,df
+    
