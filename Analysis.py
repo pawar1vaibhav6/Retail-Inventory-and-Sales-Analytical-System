@@ -47,3 +47,10 @@ def weekly_sale():
     
     df=pd.read_sql_query(query,conn)
     print(df)
+
+def inventory_value():
+    query="select sum(price*stock_quantity) from Products"
+
+    cursor.execute(query)
+    row=cursor.fetchone()
+    print(f"Total Inventory Value:{row[0]}")

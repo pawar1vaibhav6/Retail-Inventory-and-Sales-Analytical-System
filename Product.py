@@ -54,10 +54,13 @@ def price_increase():
 def stock_increase():
     pid=int(input("Product Id:"))
     added_stock=int(input("Added Quantity:"))
-    query="Update Products set stock_quantity=stock_quantity+? where product_id=?"
-    cursor.execute(query,(added_stock,pid))
-    conn.commit()
-    if cursor.rowcount>0:
-        print("Successfully Updated stock")
-    else:
-        print(f"No product with {pid} exists")
+    try:
+        query="Update Products set stock_quantity=stock_quantity+? where product_id=?"
+        cursor.execute(query,(added_stock,pid))
+        query1="Insert into Stock values(?,getdate(),?)"
+        cursor.execute(query1,(pid,added_stock))
+        conn.commit()
+        print("Stock Updated Successfully")
+    except:
+        conn.rollback()
+    
