@@ -2,6 +2,7 @@ import Product as pi
 import Customers as c
 import Sales as s
 import Analysis as a
+import Charts as ch
 
 
 def main():
@@ -15,11 +16,12 @@ def main():
             "5. Update Stock of Existing Product\n"
             "6. Add New Customers\n"
             "7. Analysis\n"
-            "8. Exit"
+            "8. Charts\n"
+            "9. Exit"
             )
         
         try:
-            options=int(input("Choose From above(1,2,3,4,5,6,7,8):"))
+            options=int(input("Choose From above(1,2,3,4,5,6,7,8,9):"))
         except ValueError:
             print("Enter a valid number")
             return
@@ -74,19 +76,34 @@ def main():
             if opt==1:
                 a.low_stock()
             elif opt==2:
-                a.monthly_sale()
+                a.monthly_sale(year=input("Enter the Year:"))
             elif opt==3:
                 a.daily_sale()
             elif opt==4:
-                a.weekly_sale()
+                a.weekly_sale(year=input("Enter the Year:"))
             elif opt==5:
                 a.inventory_value()
             elif opt==6:
                 a.category_sale()
             elif opt==7:
                 a.product_sale()
-
+        
         elif options==8:
+            
+            print(
+                "1. Monthly Sales"
+            )
+
+            try:
+                option=int(input("Choose From above(1):"))
+            except ValueError:
+                print("Enter a valid number")
+                return
+            
+            if option==1:
+                ch.monthly_sale(year=input("Enter the Year:"))
+
+        elif options==9:
             print("Thank you for visiting")
             break
 
