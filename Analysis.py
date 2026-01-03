@@ -27,11 +27,12 @@ def low_stock():
         print("Low stock products:")
         print(df)
 
-def monthly_sale():
-    query="""Select datename(M,datepart(M,Date)) as Month,sum(total_amount) as Total_sales from Sales
-                group by datepart(M,Date)"""
+def monthly_sale(year):
+    query="""Select datename(M,Date) as Month,sum(total_amount) as Total_sales from Sales
+                where datepart(yy,date)=?
+                group by datename(M,Date)"""
     
-    df=pd.read_sql_query(query,conn)
+    df=pd.read_sql_query(query,conn,params=(year))
     print(df)
 
 def daily_sale():
@@ -41,11 +42,12 @@ def daily_sale():
     df=pd.read_sql_query(query,conn)
     print(df)
 
-def weekly_sale():
+def weekly_sale(year):
     query="""select datepart(wk,date) as [Week] ,sum(total_amount) as [Total Sales] from Sales
+            where datepart(yy,date)=?
             group by datepart(wk,date)"""
     
-    df=pd.read_sql_query(query,conn)
+    df=pd.read_sql_query(query,conn,params=(year))
     print(df)
 
 def category_sale():
