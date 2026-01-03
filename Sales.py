@@ -24,6 +24,7 @@ def sale(customer_id,total_amount,bill_items):
 
     if quantity>stock:
         print("Not Enough Stock")
+        return 0,"No Bill Generated"
     else:
         query="Insert into Sales values(?,?,getdate(),?,?)"
         cursor.execute(query,(product_id,customer_id,quantity,amount))
@@ -38,15 +39,18 @@ def sale(customer_id,total_amount,bill_items):
                     where s.product_id=? and customer_id=? and quantity=? and datediff(n,Date,getdate())<=10"""
         cursor.execute(query2,(product_id,customer_id,quantity))
         row=cursor.fetchone()
-        bill_items.append({
-            "Product Id":product_id,
-            "Product":row[1],
-            "Price":row[2],
-            "Quantity":quantity,
-            "Total":row[3]
-        })
-        
-        df=pd.DataFrame(bill_items)
+        try:
+            bill_items.append({
+                "Product Id":product_id,
+                "Product":row[1],
+                "Price":row[2],
+                "Quantity":quantity,
+                "Total":row[3]
+            })
+            df=pd.DataFrame(bill_items)
+        except:
+            bill_items.extend[product_id,row[1],row[2],quantity,row[3]]
+            df=pd.DataFrame(bill_items,columns=["Product Id","Product","Price","Quantity","Total"])
 
         return total_amount,df
     
