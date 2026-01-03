@@ -20,7 +20,16 @@ def main():
         print("Enter a valid number")
         return
     if options==1:
-        s.sale()
+        customer_id=int(input("Customer_id:"))
+        total_amount=0
+        while True:
+            total_amount=s.sale(customer_id,total_amount)
+            user_input=input("Press q to exit")
+            if user_input.lower()=="q":
+                print(f"Total Payable amount:{total_amount}")
+                break
+            else:
+                continue
     elif options==2:
         pi.new_product()
     elif options==3:
