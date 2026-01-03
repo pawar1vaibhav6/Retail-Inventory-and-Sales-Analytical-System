@@ -60,9 +60,17 @@ def main():
                 "2. Month Wise Sale\n"
                 "3. Daily Sales\n"
                 "4. Weekly Sales\n"
-                "5. Inventory Value"
+                "5. Inventory Value\n"
+                "6. Category Wise Sales\n"
+                "7. Product Wise Sales"
             )
-            opt=int(input("Choose From above(1,2):"))
+
+            try:
+                opt=int(input("Choose From above(1,2,3,4,5,6,7):"))
+            except ValueError:
+                print("Enter a valid number")
+                return
+            
             if opt==1:
                 a.low_stock()
             elif opt==2:
@@ -73,6 +81,10 @@ def main():
                 a.weekly_sale()
             elif opt==5:
                 a.inventory_value()
+            elif opt==6:
+                a.category_sale()
+            elif opt==7:
+                a.product_sale()
 
         elif options==8:
             print("Thank you for visiting")

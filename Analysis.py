@@ -48,6 +48,24 @@ def weekly_sale():
     df=pd.read_sql_query(query,conn)
     print(df)
 
+def category_sale():
+    query="""select Category,sum(total_amount) as [Total Sales]
+        from Products p join Sales s 
+        on p.product_id=s.product_id
+        group by category"""
+
+    df=pd.read_sql_query(query,conn)
+    print(df)
+
+def product_sale():
+    query="""select p_name,sum(total_amount) as [Total Sales]
+        from Products p join Sales s 
+        on p.product_id=s.product_id
+        group by p_name"""
+
+    df=pd.read_sql_query(query,conn)
+    print(df)
+
 def inventory_value():
     query="select sum(price*stock_quantity) from Products"
 
