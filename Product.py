@@ -1,4 +1,5 @@
 import pyodbc
+import pandas as pd
 
 conn = pyodbc.connect(
     "Driver={ODBC Driver 18 for SQL Server};"
@@ -25,21 +26,27 @@ def new_product():
     except:
         print("Product Already Exists")
 
-def check_product(pid):
+def check_product(prompt,result):
     try:
-        query="Select * from Products where product_id=?"
-        cursor.execute(query,(pid,))
+        query="Select * from Products where {}=?".format(prompt)
+        cursor.execute(query,(result,))
         rows=cursor.fetchall()
-        row=rows[0]
-        product={
-            "Product":row[1],
-            "Category":row[2],
-            "Price":row[3],
-            "Stock":row[4]
-        }
-        print(product)
-    except Exception as e:
-        print(e)
+        product=[]
+        for row in rows:
+            product.append({
+                "Product Id":row[0],
+                "Product":row[1],
+                "Category":row[2],
+                "Price":row[3],
+                "Stock":row[4]
+            })
+        if len(product) == 1:
+            print(product[0])
+        else:
+            df=pd.DataFrame(product)
+            print(df)
+    except:
+        print(f"Product with {prompt} not found.")
 
 def price_increase():
     pid=int(input("Product Id:"))

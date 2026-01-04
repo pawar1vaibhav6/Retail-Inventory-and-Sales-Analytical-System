@@ -61,13 +61,33 @@ def main():
                 pi.new_product()
 
             elif options==3:
+                print(
+                    "1. Product Id\n"
+                    "2. Product Name\n"
+                    "3. Category"
+                )
                 try:
-                    pid=int(input("ProductId:"))
+                    p=int(input("Choose from (1-3):"))
                 except ValueError:
-                    print("\033[31mInvalid input. Please enter a valid Product Id.\033[0m")
+                    print("\033[31mInvalid input. Please enter a valid number.\033[0m")
                     continue
 
-                pi.check_product(pid)
+                if p==1:
+                    try:
+                        product_id=int(input("ProductId:"))
+                    except ValueError:
+                        print("\033[31mInvalid input. Please enter a valid Product Id.\033[0m")
+                        continue
+                    pi.check_product("product_id",product_id)
+
+                elif p==2:
+                    p_name=input("Enter Product Name:")
+                    pi.check_product("p_name",p_name)
+
+                elif p==3:
+                    category=input("Enter Product Category:")
+                    pi.check_product("category",category)
+                
 
             elif options==4:
                 pi.price_increase()
