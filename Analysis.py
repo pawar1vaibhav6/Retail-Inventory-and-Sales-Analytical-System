@@ -1,5 +1,6 @@
 import pyodbc
 import pandas as pd
+import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -54,7 +55,8 @@ def category_sale():
     query="""select Category,sum(total_amount) as [Total Sales]
         from Products p join Sales s 
         on p.product_id=s.product_id
-        group by category"""
+        group by category
+        order by sum(total_amount) desc"""
 
     df=pd.read_sql_query(query,conn)
     print(df)
@@ -63,7 +65,8 @@ def product_sale():
     query="""select p_name,sum(total_amount) as [Total Sales]
         from Products p join Sales s 
         on p.product_id=s.product_id
-        group by p_name"""
+        group by p_name
+        order by sum(total_amount) desc"""
 
     df=pd.read_sql_query(query,conn)
     print(df)
