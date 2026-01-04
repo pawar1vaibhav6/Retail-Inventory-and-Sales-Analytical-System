@@ -16,9 +16,10 @@ def new_product():
     category=input("Product Category:")
     price=int(input("Product Price:"))
     stock=int(input("Product Stock:"))
+    cost=int(input("Product Cost:"))
     try:
-        query="insert into products values(?,?,?,?,?)"
-        cursor.execute(query,(pid,p_name,category,price,stock))
+        query="insert into products values(?,?,?,?,?,?)"
+        cursor.execute(query,(pid,p_name,category,price,stock,cost))
         conn.commit()
         print("Product Added successfully")
     except:
@@ -55,10 +56,13 @@ def stock_increase():
     pid=int(input("Product Id:"))
     added_stock=int(input("Added Quantity:"))
     try:
+        q="select cost from products where product_id=?"
+        cursor.execute(q,(pid,))
+        cost=cursor.fetchone()[0]
         query="Update Products set stock_quantity=stock_quantity+? where product_id=?"
         cursor.execute(query,(added_stock,pid))
-        query1="Insert into Stock values(?,getdate(),?)"
-        cursor.execute(query1,(pid,added_stock))
+        query1="Insert into Stock values(?,getdate(),?,?)"
+        cursor.execute(query1,(pid,added_stock,cost*added_stock))
         conn.commit()
         print("Stock Updated Successfully")
     except:

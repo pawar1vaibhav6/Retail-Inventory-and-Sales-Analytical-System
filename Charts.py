@@ -25,7 +25,7 @@ def monthly_sale(year):
     plt.bar(df["Month"], df["Total_sales"])
     plt.xlabel("Month")
     plt.ylabel("Total Sales (In Rupees)")
-    plt.title("Monthly Sales")
+    plt.title(f"Monthly Sales {year}")
     plt.xticks(rotation=45)
     plt.tight_layout()
     plt.show()
@@ -57,6 +57,24 @@ def daily_sale(year,month):
     plt.xlabel("Date")
     plt.ylabel("Total Sales (in Rupees)")
     plt.title("Daily Sales Trend")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+def profit(year):
+    query="""Select datename(M,s.Date) as Month,sum(s.total_amount)as Revenue,sum(p.cost*s.quantity) as Cost,sum(s.total_amount-(p.cost*s.quantity)) as Profit 
+            from Sales s Join Products p
+            on s.product_id=p.product_id
+            where datepart(yy,s.date)=?
+            group by datename(M,Date)"""
+    
+    df=pd.read_sql_query(query,conn,params=(year))
+
+    plt.figure(figsize=(8,4))
+    plt.plot(df["Month"], df["Profit"], marker='o')
+    plt.title(f"Monthly Profit - {year}")
+    plt.xlabel("Month")
+    plt.ylabel("Profit")
     plt.xticks(rotation=45)
     plt.tight_layout()
     plt.show()

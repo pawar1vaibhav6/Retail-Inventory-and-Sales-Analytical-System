@@ -131,7 +131,8 @@ def main():
                     "\033[36m"
                     "1. Monthly Sales\n"
                     "2. Weekly Sales\n"
-                    "3. Daily Sales"
+                    "3. Daily Sales\n"
+                    "4. Monthly Profit"
                     "\033[0m"
                 )
 
@@ -167,6 +168,13 @@ def main():
                         print("\033[31mEnter a valid Month\033[0m")
                         continue
                     ch.daily_sale(year,month)
+                elif option==4:
+                    try:
+                        year=int(input("Enter the Year:"))
+                    except ValueError:
+                        print("\033[31mEnter a valid Year\033[0m")
+                        continue
+                    ch.profit(year)
                 else:
                     print("\033[31mInvalid Input\033[0m")
             
