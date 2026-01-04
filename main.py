@@ -91,17 +91,23 @@ def main():
         elif options==8:
             
             print(
-                "1. Monthly Sales"
+                "1. Monthly Sales\n"
+                "2. Weekly Sales\n"
+                "3. Daily Sales"
             )
 
             try:
-                option=int(input("Choose From above(1):"))
+                option=int(input("Choose From above(1,2,3):"))
             except ValueError:
                 print("Enter a valid number")
                 return
             
             if option==1:
                 ch.monthly_sale(year=input("Enter the Year:"))
+            elif option==2:
+                ch.weekly_sale(year=input("Enter the Year:"))
+            elif option==3:
+                ch.daily_sale(year=input("Enter the Year:"),month=input("Enter the Month:"))
 
         elif options==9:
             print("Thank you for visiting")

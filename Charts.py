@@ -24,8 +24,39 @@ def monthly_sale(year):
     plt.figure()
     plt.bar(df["Month"], df["Total_sales"])
     plt.xlabel("Month")
-    plt.ylabel("Total Sales")
+    plt.ylabel("Total Sales (In Rupees)")
     plt.title("Monthly Sales")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+def weekly_sale(year):
+    query="""select datepart(wk,date) as [Week] ,sum(total_amount) as [Total Sales] from Sales
+            where datepart(yy,date)=?
+            group by datepart(wk,date)"""
+    
+    df=pd.read_sql_query(query,conn,params=(year))
+    plt.figure()
+    plt.bar(df["Week"], df["Total Sales"])
+    plt.xlabel("Weeks")
+    plt.ylabel("Total Sales (In Rupees)")
+    plt.title("Weekly Sales")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+def daily_sale(year,month):
+    query="""select FORMAT(date,'dd-MM-yyyy') as [Date] ,sum(total_amount) as [Total Sales] from Sales
+            where datepart(yyyy,date)=? and datepart(m,date)=?
+            group by FORMAT(date,'dd-MM-yyyy')"""
+    
+    df=pd.read_sql_query(query,conn,params=(year,month))
+    
+    plt.figure()
+    plt.plot(df["Date"], df["Total Sales"])
+    plt.xlabel("Date")
+    plt.ylabel("Total Sales (in Rupees)")
+    plt.title("Daily Sales Trend")
     plt.xticks(rotation=45)
     plt.tight_layout()
     plt.show()
