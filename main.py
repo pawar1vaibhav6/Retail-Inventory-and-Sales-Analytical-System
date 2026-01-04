@@ -3,9 +3,16 @@ import Customers as c
 import Sales as s
 import Analysis as a
 import Charts as ch
+import login as l
 
 
 def main():
+    role = None
+    while role is None:
+        role = l.login()
+    
+    admin_only = [2, 4, 5, 6, 7, 8]
+
     while True:
         
         print(
@@ -17,13 +24,18 @@ def main():
             "6. Add New Customers\n"
             "7. Analysis\n"
             "8. Charts\n"
-            "9. Exit"
+            "9. Log Out\n"
+            "10. Exit"
             )
         
         try:
-            options=int(input("Choose from above(1-9):"))
+            options=int(input("Choose from above(1-10):"))
         except ValueError:
             print("Invalid input. Please enter a number.")
+            continue
+
+        if options in admin_only and role != "admin":
+            print("Access denied. Admin only.")
             continue
         
         if options==1:
@@ -150,8 +162,12 @@ def main():
                 ch.daily_sale(year,month)
             else:
                 print("Invalid Input")
-
+        
         elif options==9:
+            print("Logged out successfully")
+            break
+
+        elif options==10:
             print("Thank you for visiting")
             break
 
