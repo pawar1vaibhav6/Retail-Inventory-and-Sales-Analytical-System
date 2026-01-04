@@ -21,31 +21,39 @@ def main():
             )
         
         try:
-            options=int(input("Choose From above(1,2,3,4,5,6,7,8,9):"))
+            options=int(input("Choose from above(1-9):"))
         except ValueError:
-            print("Enter a valid number")
-            return
+            print("Invalid input. Please enter a number.")
+            continue
         
         if options==1:
-            customer_id=int(input("Customer_id:"))
+
+            try:
+                customer_id=int(input("Customer_id:"))
+            except ValueError:
+                print("Invalid input. Please enter a valid CustomerId.")
+                continue
+
             total_amount=0
             bill_items=[]
             while True:
                 total_amount,bill=s.sale(customer_id,total_amount,bill_items)
-                user_input=input("Press q to exit")
-                if user_input.lower()=="q":
-                    print(bill)
-                    print(f"Total Payable amount:{total_amount}")
+                if input("Add another item? (q to quit): ").lower() == "q":
                     break
-                else:
-                    continue
+            print(bill)
+            print(f"Total Payable amount:{total_amount}")
 
         elif options==2:
             pi.new_product()
 
         elif options==3:
-            id=int(input("Id:"))
-            pi.check_product(id)
+            try:
+                pid=int(input("ProductId:"))
+            except ValueError:
+                print("Invalid input. Please enter a valid Product Id.")
+                continue
+
+            pi.check_product(pid)
 
         elif options==4:
             pi.price_increase()
@@ -68,25 +76,37 @@ def main():
             )
 
             try:
-                opt=int(input("Choose From above(1,2,3,4,5,6,7):"))
+                opt=int(input("Choose from above(1-7):"))
             except ValueError:
-                print("Enter a valid number")
-                return
+                print("Invalid input. Please enter a valid number")
+                continue
             
             if opt==1:
                 a.low_stock()
             elif opt==2:
-                a.monthly_sale(year=input("Enter the Year:"))
+                try:
+                    year=int(input("Enter the Year:"))
+                except ValueError:
+                    print("Enter a valid Year")
+                    continue
+                a.monthly_sale(year)
             elif opt==3:
                 a.daily_sale()
             elif opt==4:
-                a.weekly_sale(year=input("Enter the Year:"))
+                try:
+                    year=int(input("Enter the Year:"))
+                except ValueError:
+                    print("Enter a valid Year")
+                    continue
+                a.weekly_sale(year)
             elif opt==5:
                 a.inventory_value()
             elif opt==6:
                 a.category_sale()
             elif opt==7:
                 a.product_sale()
+            else:
+                print("Invalid Input")
         
         elif options==8:
             
@@ -97,17 +117,39 @@ def main():
             )
 
             try:
-                option=int(input("Choose From above(1,2,3):"))
+                option=int(input("Choose from above(1-3):"))
             except ValueError:
-                print("Enter a valid number")
-                return
+                print("Invalid input. Please enter a valid number.")
+                continue
             
             if option==1:
-                ch.monthly_sale(year=input("Enter the Year:"))
+                try:
+                    year=int(input("Enter the Year:"))
+                except ValueError:
+                    print("Enter a valid Year")
+                    continue
+                ch.monthly_sale(year)
             elif option==2:
-                ch.weekly_sale(year=input("Enter the Year:"))
+                try:
+                    year=int(input("Enter the Year:"))
+                except ValueError:
+                    print("Enter a valid Year")
+                    continue
+                ch.weekly_sale(year)
             elif option==3:
-                ch.daily_sale(year=input("Enter the Year:"),month=input("Enter the Month:"))
+                try:
+                    year=int(input("Enter the Year:"))
+                except ValueError:
+                    print("Enter a valid Year")
+                    continue
+                try:
+                    month=int(input("Enter the Month:"))
+                except ValueError:
+                    print("Enter a valid Month")
+                    continue
+                ch.daily_sale(year,month)
+            else:
+                print("Invalid Input")
 
         elif options==9:
             print("Thank you for visiting")
