@@ -52,11 +52,10 @@ def main():
                 total_amount=0
                 bill_items=[]
                 while True:
-                    total_amount,bill=s.sale(customer_id,total_amount,bill_items)
+                    total_amount,bill,s_id,s_date=s.sale(customer_id,total_amount,bill_items)
                     if input("Add another item? (q to quit): ").lower() == "q":
                         break
-                print(bill)
-                print(f"\033[1;32mTotal Payable amount:{total_amount}\033[0m")
+                s.bill_format(s_id,s_date,customer_id,bill,total_amount)
 
             elif options==2:
                 pi.new_product()

@@ -34,7 +34,7 @@ def sale(customer_id,total_amount,bill_items):
         cursor.execute(query1,(quantity,product_id))
         conn.commit()
 
-        query2="""Select s.product_id,p_name,price,total_amount 
+        query2="""Select s.product_id,p_name,price,total_amount,s.sales_id,s.date
                     from Products p join Sales s on p.product_id=s.product_id 
                     where s.product_id=? and customer_id=? and quantity=? and datediff(n,Date,getdate())<=10"""
         cursor.execute(query2,(product_id,customer_id,quantity))
@@ -49,8 +49,18 @@ def sale(customer_id,total_amount,bill_items):
             })
             df=pd.DataFrame(bill_items)
         except:
-            bill_items.extend[product_id,row[1],row[2],quantity,row[3]]
+            bill_items.extend([product_id,row[1],row[2],quantity,row[3]])
             df=pd.DataFrame(bill_items,columns=["Product Id","Product","Price","Quantity","Total"])
 
-        return total_amount,df
+        return total_amount,df,row[4],row[5]
+    
+def bill_format(s_id,s_date,c_id,df,total):
+    m="""\033[1;32m                       Tax Invoice  
+    Bill No:{}
+    Bill Date & Time:{}
+    Customer Id:{}
+    {}
+    Total:{}\033[0m""".format(s_id,s_date,c_id,df,total)
+
+    print(m)
     
