@@ -9,8 +9,13 @@ import login as l
 def main():
     while True:
         role = None
-        while role is None:
+        for _ in range(3):
             role = l.login()
+            if role:
+                break
+            else:
+                print("Too many failed attempts.")
+                return
         
         admin_only = [2, 4, 5, 6, 7, 8]
 

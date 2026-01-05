@@ -40,12 +40,9 @@ def check_product(prompt,result):
                 "Price":row[3],
                 "Stock":row[4]
             })
-        if len(product) == 1:
-            df=pd.DataFrame(product)
-            print(df)
-        else:
-            df=pd.DataFrame(product)
-            print(df)
+        
+        df=pd.DataFrame(product)
+        print(df)
     else:
         print(f"Product with {result} not found.")
 
@@ -66,13 +63,19 @@ def stock_increase():
     try:
         q="select cost from products where product_id=?"
         cursor.execute(q,(pid,))
-        cost=cursor.fetchone()[0]
+        row=cursor.fetchone()
+        if not row:
+            print("Product not found")
+            return
+        cost=row[0]
         query="Update Products set stock_quantity=stock_quantity+? where product_id=?"
         cursor.execute(query,(added_stock,pid))
         query1="Insert into Stock values(?,getdate(),?,?)"
         cursor.execute(query1,(pid,added_stock,cost*added_stock))
         conn.commit()
         print("Stock Updated Successfully")
-    except:
+    except Exception as e:
         conn.rollback()
+        print("Failed to update stock:", e)
+
     

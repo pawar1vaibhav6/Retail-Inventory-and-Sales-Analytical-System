@@ -20,10 +20,13 @@ def sale(customer_id,total_amount,bill_items):
 
     q="Select stock_quantity,price,category from Products where Product_id=?"
     cursor.execute(q,(product_id,))
-    row=cursor.fetchall()
-    stock=row[0][0]
-    price=row[0][1]
-    cat=row[0][2]
+    row=cursor.fetchone()
+    if not row:
+        print("Product not found")
+        return total_amount, None, None, None
+    stock=row[0]
+    price=row[1]
+    cat=row[2]
     amount=quantity*price
 
     if cat in gst_0:
@@ -41,7 +44,7 @@ def sale(customer_id,total_amount,bill_items):
 
     if quantity>stock:
         print("Not Enough Stock")
-        return 0,"No Bill Generated"
+        return total_amount, None, None, None
     else:
         query="Insert into Sales values(?,?,getdate(),?,?,?)"
         cursor.execute(query,(product_id,customer_id,quantity,amount,amount*gst))
@@ -56,23 +59,18 @@ def sale(customer_id,total_amount,bill_items):
         cursor.execute(query2,(product_id,customer_id,quantity))
         row=cursor.fetchone()
 
-        
-        try:
-            bill_items.append({
-                "Product Id":product_id,
-                "Product":row[1],
-                "Price":row[2],
-                "Quantity":quantity,
-                "Total":row[3],
-                "CGST":cgst,
-                "SGSt":sgst,
-                "GST_Total":row[3]*gst,
-                "Final Amount":row[3]+row[3]*gst
-            })
-            df=pd.DataFrame(bill_items)
-        except:
-            bill_items.extend([product_id,row[1],row[2],quantity,row[3],cgst,sgst,row[3]*gst,row[3]+row[3]*gst])
-            df=pd.DataFrame(bill_items,columns=["Product Id","Product","Price","Quantity","Total","CGST","SGSt","GST_Total","Final Amount"])
+        bill_items.append({
+            "Product Id":product_id,
+            "Product":row[1],
+            "Price":row[2],
+            "Quantity":quantity,
+            "Total":row[3],
+            "CGST":cgst,
+            "SGSt":sgst,
+            "GST_Total":row[3]*gst,
+            "Final Amount":row[3]+row[3]*gst
+        })
+        df=pd.DataFrame(bill_items)
         total_amount+=amount+row[3]*gst
         return total_amount,df,row[4],row[5]
     

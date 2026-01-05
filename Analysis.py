@@ -29,20 +29,21 @@ def low_stock():
         print(df)
 
 def monthly_sale(year):
-    query="""Select datename(M,s.Date) as Month,sum(s.total_amount)as Revenue,sum(p.cost*s.quantity) as Cost,sum(s.total_amount-(p.cost*s.quantity)) as Profit 
+    query="""Select datepart(M,Date) as MonthNo,datename(M,s.Date) as Month,sum(s.total_amount)as Revenue,sum(p.cost*s.quantity) as Cost,sum(s.total_amount-(p.cost*s.quantity)) as Profit 
             from Sales s Join Products p
             on s.product_id=p.product_id
             where datepart(yy,s.date)=?
-            group by datename(M,Date)"""
+            group by datepart(M,Date),datename(M,Date)
+            ORDER BY MonthNo"""
     
     df=pd.read_sql_query(query,conn,params=(year))
     print(df)
 
 def daily_sale():
-    query="""Select FORMAT(date,'dd-MM-yyyy') as [Date],sum(s.total_amount)as Revenue,sum(p.cost*s.quantity) as Cost,sum(s.total_amount-(p.cost*s.quantity)) as Profit 
+    query="""Select cast(date as Date) as [Date],sum(s.total_amount)as Revenue,sum(p.cost*s.quantity) as Cost,sum(s.total_amount-(p.cost*s.quantity)) as Profit 
                 from Sales s Join Products p
                 on s.product_id=p.product_id
-                group by FORMAT(date,'dd-MM-yyyy')"""
+                group by cast(date as Date)"""
     
     df=pd.read_sql_query(query,conn)
     print(df)

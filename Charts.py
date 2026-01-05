@@ -46,14 +46,14 @@ def weekly_sale(year):
     plt.show()
 
 def daily_sale(year,month):
-    query="""select FORMAT(date,'dd-MM-yyyy') as [Date] ,sum(total_amount) as [Total Sales] from Sales
+    query="""select CAST(date AS DATE) AS SaleDate ,sum(total_amount) as [Total Sales] from Sales
             where datepart(yyyy,date)=? and datepart(m,date)=?
-            group by FORMAT(date,'dd-MM-yyyy')"""
+            group by CAST(date AS DATE)"""
     
     df=pd.read_sql_query(query,conn,params=(year,month))
     
     plt.figure()
-    plt.plot(df["Date"], df["Total Sales"])
+    plt.plot(df["SaleDate"], df["Total Sales"])
     plt.xlabel("Date")
     plt.ylabel("Total Sales (in Rupees)")
     plt.title("Daily Sales Trend")
@@ -62,11 +62,18 @@ def daily_sale(year,month):
     plt.show()
 
 def profit(year):
-    query="""Select datename(M,s.Date) as Month,sum(s.total_amount)as Revenue,sum(p.cost*s.quantity) as Cost,sum(s.total_amount-(p.cost*s.quantity)) as Profit 
-            from Sales s Join Products p
-            on s.product_id=p.product_id
-            where datepart(yy,s.date)=?
-            group by datename(M,Date)"""
+    query="""SELECT 
+        datepart(M, s.Date) AS MonthNo,
+        datename(M, s.Date) AS Month,
+        SUM(s.total_amount) AS Revenue,
+        SUM(p.cost * s.quantity) AS Cost,
+        SUM(s.total_amount - (p.cost * s.quantity)) AS Profit
+        FROM Sales s
+        JOIN Products p ON s.product_id = p.product_id
+        WHERE datepart(yy, s.Date) = ?
+        GROUP BY datepart(M, s.Date), datename(M, s.Date)
+        ORDER BY MonthNo
+    """
     
     df=pd.read_sql_query(query,conn,params=(year))
 
