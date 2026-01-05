@@ -107,7 +107,8 @@ def main():
                     "4. Weekly Sales\n"
                     "5. Inventory Value\n"
                     "6. Category Wise Sales\n"
-                    "7. Product Wise Sales"
+                    "7. Product Wise Sales\n"
+                    "8. Monthly Gst Collection"
                     "\033[0m"
                 )
 
@@ -141,6 +142,13 @@ def main():
                     a.category_sale()
                 elif opt==7:
                     a.product_sale()
+                elif opt==8:
+                    try:
+                        year=int(input("Enter the Year:"))
+                    except ValueError:
+                        print("\033[31mEnter a valid Year\033[0m")
+                        continue
+                    a.monthly_gst(year)
                 else:
                     print("\033[31mInvalid Input\033[0m")
             

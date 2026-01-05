@@ -81,3 +81,10 @@ def inventory_value():
     cursor.execute(query)
     row=cursor.fetchone()
     print(f"Total Inventory Value:{row[0]}")
+
+def monthly_gst(year):
+    query="""Select datename(M,Date) as Month,sum(gst_amount) as [Total Gst] from Sales
+            where datepart(YYYY,Date)=?
+            group by datename(M,Date)"""
+    df=pd.read_sql_query(query,conn,params=(year,))
+    print(df)
