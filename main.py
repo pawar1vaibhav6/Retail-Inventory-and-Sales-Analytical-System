@@ -113,7 +113,7 @@ def main():
                 )
 
                 try:
-                    opt=int(input("Choose from above(1-7):"))
+                    opt=int(input("Choose from above(1-8):"))
                 except ValueError:
                     print("\033[31mInvalid input. Please enter a valid number.\033[0m")
                     continue
@@ -164,7 +164,7 @@ def main():
                 )
 
                 try:
-                    option=int(input("Choose from above(1-3):"))
+                    option=int(input("Choose from above(1-4):"))
                 except ValueError:
                     print("\033[31mInvalid input. Please enter a valid number.\033[0m")
                     continue
