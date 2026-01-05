@@ -150,5 +150,5 @@ The Retail Inventory and Sales Analytical System demonstrates a complete retail 
 
 ---
 ## Author
-# Vaibhav Pawar
+### Vaibhav Pawar
 
