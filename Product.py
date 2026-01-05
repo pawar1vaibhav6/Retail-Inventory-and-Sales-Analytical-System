@@ -27,10 +27,10 @@ def new_product():
         print("Product Already Exists")
 
 def check_product(prompt,result):
-    try:
-        query="Select * from Products where {}=?".format(prompt)
-        cursor.execute(query,(result,))
-        rows=cursor.fetchall()
+    query="Select * from Products where {}=?".format(prompt)
+    cursor.execute(query,(result,))
+    rows=cursor.fetchall()
+    if len(rows)>=1:
         product=[]
         for row in rows:
             product.append({
@@ -41,12 +41,13 @@ def check_product(prompt,result):
                 "Stock":row[4]
             })
         if len(product) == 1:
-            print(product[0])
+            df=pd.DataFrame(product)
+            print(df)
         else:
             df=pd.DataFrame(product)
             print(df)
-    except:
-        print(f"Product with {prompt} not found.")
+    else:
+        print(f"Product with {result} not found.")
 
 def price_increase():
     pid=int(input("Product Id:"))
