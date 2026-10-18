@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+
+{% block title %}Inventory & Products - RetailSphere{% endblock %}
+
+{% block content %}
+<div class="inventory-container">
+    <!-- Header -->
+    <div class="page-header">
+        <div>
+            <h2><i class="fa-solid fa-boxes-stacked"></i> Inventory & Product Catalog</h2>
+            <p class="subtitle">Manage products, adjust selling prices, replenish warehouse stock, and monitor low-stock warnings.</p>
+        </div>
+        <div class="header-actions">
+            {% if session.get('role') == 'admin' %}
+            <button type="button" class="btn btn-primary" onclick="openAddProductModal()">
+                <i class="fa-solid fa-plus"></i> Add New Product
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Search & Filter Bar -->
+    <div class="card mb-4">
+        <div class="card-body py-3">
+            <form method="GET" action="{{ url_for('products') }}" class="search-filter-form">
+                <div class="filter-input-wrap">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input 
+                        type="text" 
+                        name="search" 
+                        class="form-control" 
+                        placeholder="Search by product name or ID..." 
+                        value="{{ search }}"
+                    >
+                </div>
+                <div class="filter-select-wrap">
+                    <select name="category" class="form-control" onchange="this.form.submit()">
+                        <option value="">All Categories</option>
+                        {% for cat in categories %}
+                            <option value="{{ cat }}" {% if selected_category == cat %}selected{% endif %}>{{ cat }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-secondary">Filter</button>
+                {% if search or selected_category %}
+                    <a href="{{ url_for('products') }}" class="btn btn-outline-danger">Reset</a>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+
+    <!-- Products Table Card -->
+    <div class="card">
+        <div class="card-header flex-between">
+            <h4><i class="fa-solid fa-table-list"></i> Product Directory ({{ products|length }} items)</h4>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Product Name</th>
+                            <th>Category</th>
+                            <th>Selling Price</th>
+                            <th>Cost Price</th>
+                            <th>Stock Quantity</th>
+                            <th>Status</th>
+                            {% if session.get('role') == 'admin' %}
+                            <th>Actions</th>
+                            {% endif %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if products %}
+                            {% for p in products %}
+                                <tr>
+                                    <td><span class="code-pill">#{{ p[0] }}</span></td>
+                                    <td><strong>{{ p[1] }}</strong></td>
+                                    <td><span class="category-pill">{{ p[2] }}</span></td>
+                                    <td><strong>₹{{ p[3] }}</strong></td>
+                                    <td class="text-muted">₹{{ p[5] }}</td>
+                                    <td>
+                                        <span class="stock-qty-val {% if p[4] < 5 %}text-danger font-bold{% endif %}">
+                                            {{ p[4] }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        {% if p[4] < 5 %}
+                                            <span class="badge badge-warning"><i class="fa-solid fa-triangle-exclamation"></i> Low Stock</span>
+                                        {% else %}
+                                            <span class="badge badge-success"><i class="fa-solid fa-circle-check"></i> In Stock</span>
+                                        {% endif %}
+                                    </td>
+                                    {% if session.get('role') == 'admin' %}
+                                    <td>
+                                        <div class="action-buttons">
+                                            <button 
+                                                type="button" 
+                                                class="btn btn-sm btn-outline-primary" 
+                                                onclick="openPriceModal('{{ p[0] }}', '{{ p[1] }}', '{{ p[3] }}')"
+                                                title="Adjust Price"
+                                            >
+                                                <i class="fa-solid fa-tag"></i> Price
+                                            </button>
+                                            <button 
+                                                type="button" 
+                                                class="btn btn-sm btn-outline-success" 
+                                                onclick="openRestockModal('{{ p[0] }}', '{{ p[1] }}', '{{ p[4] }}')"
+                                                title="Replenish Stock"
+                                            >
+                                                <i class="fa-solid fa-dolly"></i> Restock
+                                            </button>
+                                        </div>
+                                    </td>
+                                    {% endif %}
+                                </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="8" class="text-center py-5 text-muted">
+                                    <i class="fa-solid fa-box-open empty-icon"></i>
+                                    <p>No products found matching your search criteria.</p>
+                                </td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal 1: Add New Product -->
+<div id="addProductModal" class="modal-overlay d-none">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h3><i class="fa-solid fa-box-archive"></i> Add New Product</h3>
+            <button type="button" class="modal-close" onclick="closeModal('addProductModal')">&times;</button>
+        </div>
+        <form method="POST" action="{{ url_for('product_add') }}">
+            <div class="modal-body">
+                <div class="form-group mb-3">
+                    <label for="new_pid">Product ID (Unique Integer)</label>
+                    <input type="number" id="new_pid" name="product_id" class="form-control" required placeholder="e.g. 101">
+                </div>
+                <div class="form-group mb-3">
+                    <label for="new_pname">Product Name</label>
+                    <input type="text" id="new_pname" name="p_name" class="form-control" required placeholder="e.g. Basmati Rice 1kg">
+                </div>
+                <div class="form-group mb-3">
+                    <label for="new_pcat">Category</label>
+                    <input type="text" id="new_pcat" name="category" class="form-control" list="catList" required placeholder="e.g. Grocery, Electronics, Fruits">
+                    <datalist id="catList">
+                        {% for cat in categories %}
+                            <option value="{{ cat }}"></option>
+                        {% endfor %}
+                    </datalist>
+                </div>
+                <div class="form-row mb-3">
+                    <div class="form-group flex-1">
+                        <label for="new_price">Selling Price (₹)</label>
+                        <input type="number" id="new_price" name="price" class="form-control" min="0" required placeholder="e.g. 150">
+                    </div>
+                    <div class="form-group flex-1">
+                        <label for="new_cost">Cost Price (₹)</label>
+                        <input type="number" id="new_cost" name="cost" class="form-control" min="0" required placeholder="e.g. 110">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="new_stock">Initial Stock Quantity</label>
+                    <input type="number" id="new_stock" name="stock_quantity" class="form-control" min="0" required placeholder="e.g. 50">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('addProductModal')">Cancel</button>
+                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-check"></i> Save Product</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal 2: Update Price -->
+<div id="priceModal" class="modal-overlay d-none">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h3><i class="fa-solid fa-tag"></i> Update Product Price</h3>
+            <button type="button" class="modal-close" onclick="closeModal('priceModal')">&times;</button>
+        </div>
+        <form method="POST" action="{{ url_for('product_update_price') }}">
+            <div class="modal-body">
+                <input type="hidden" id="price_pid" name="product_id">
+                <p class="mb-3">Updating selling price for: <strong id="price_pname"></strong> (#<span id="price_pid_display"></span>)</p>
+                <div class="form-group">
+                    <label for="price_new_val">New Selling Price (₹)</label>
+                    <input type="number" id="price_new_val" name="new_price" class="form-control" min="0" required>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('priceModal')">Cancel</button>
+                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Update Price</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal 3: Restock -->
+<div id="restockModal" class="modal-overlay d-none">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h3><i class="fa-solid fa-dolly"></i> Replenish Inventory Stock</h3>
+            <button type="button" class="modal-close" onclick="closeModal('restockModal')">&times;</button>
+        </div>
+        <form method="POST" action="{{ url_for('product_restock') }}">
+            <div class="modal-body">
+                <input type="hidden" id="restock_pid" name="product_id">
+                <p class="mb-2">Product: <strong id="restock_pname"></strong></p>
+                <p class="text-muted mb-3">Current Warehouse Stock: <strong id="restock_curr"></strong> units</p>
+                <div class="form-group">
+                    <label for="restock_added">Quantity to Add</label>
+                    <input type="number" id="restock_added" name="added_stock" class="form-control" min="1" required placeholder="e.g. 25">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('restockModal')">Cancel</button>
+                <button type="submit" class="btn btn-success"><i class="fa-solid fa-plus-circle"></i> Confirm Restock</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function closeModal(id) {
+        document.getElementById(id).classList.add("d-none");
+    }
+
+    function openAddProductModal() {
+        document.getElementById("addProductModal").classList.remove("d-none");
+    }
+
+    function openPriceModal(pid, name, currPrice) {
+        document.getElementById("price_pid").value = pid;
+        document.getElementById("price_pid_display").innerText = pid;
+        document.getElementById("price_pname").innerText = name;
+        document.getElementById("price_new_val").value = currPrice;
+        document.getElementById("priceModal").classList.remove("d-none");
+    }
+
+    function openRestockModal(pid, name, currStock) {
+        document.getElementById("restock_pid").value = pid;
+        document.getElementById("restock_pname").innerText = name;
+        document.getElementById("restock_curr").innerText = currStock;
+        document.getElementById("restock_added").value = "";
+        document.getElementById("restockModal").classList.remove("d-none");
+    }
+</script>
+{% endblock %}
+

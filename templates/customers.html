@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}Customers Directory - RetailSphere{% endblock %}
+
+{% block content %}
+<div class="customers-container">
+    <!-- Header -->
+    <div class="page-header">
+        <div>
+            <h2><i class="fa-solid fa-users"></i> Customer Directory</h2>
+            <p class="subtitle">Maintain customer profiles, region demographics, and customer billing references.</p>
+        </div>
+        <div class="header-actions">
+            <button type="button" class="btn btn-primary" onclick="openAddCustomerModal()">
+                <i class="fa-solid fa-user-plus"></i> Add New Customer
+            </button>
+        </div>
+    </div>
+
+    <!-- Search Bar -->
+    <div class="card mb-4">
+        <div class="card-body py-3">
+            <form method="GET" action="{{ url_for('customers') }}" class="search-filter-form">
+                <div class="filter-input-wrap flex-1">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input 
+                        type="text" 
+                        name="search" 
+                        class="form-control" 
+                        placeholder="Search by customer name, email, region, or ID..." 
+                        value="{{ search }}"
+                    >
+                </div>
+                <button type="submit" class="btn btn-secondary">Search</button>
+                {% if search %}
+                    <a href="{{ url_for('customers') }}" class="btn btn-outline-danger">Reset</a>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+
+    <!-- Customers Table Card -->
+    <div class="card">
+        <div class="card-header flex-between">
+            <h4><i class="fa-solid fa-address-book"></i> Registered Customers ({{ customers|length }})</h4>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Customer ID</th>
+                            <th>Customer Name</th>
+                            <th>Email Address</th>
+                            <th>Region / Location</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if customers %}
+                            {% for c in customers %}
+                                <tr>
+                                    <td><span class="code-pill">#{{ c[0] }}</span></td>
+                                    <td>
+                                        <div class="user-cell">
+                                            <div class="avatar-cell">{{ c[1][:1]|upper }}</div>
+                                            <strong>{{ c[1] }}</strong>
+                                        </div>
+                                    </td>
+                                    <td><a href="mailto:{{ c[2] }}" class="text-muted">{{ c[2] }}</a></td>
+                                    <td><span class="badge badge-secondary">{{ c[3] }}</span></td>
+                                    <td>
+                                        <a href="{{ url_for('pos') }}" class="btn btn-sm btn-outline-primary" title="Create Bill for Customer">
+                                            <i class="fa-solid fa-receipt"></i> New Bill
+                                        </a>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center py-5 text-muted">
+                                    <i class="fa-solid fa-user-slash empty-icon"></i>
+                                    <p>No customers found matching your query.</p>
+                                </td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Add New Customer -->
+<div id="addCustomerModal" class="modal-overlay d-none">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h3><i class="fa-solid fa-user-plus"></i> Register New Customer</h3>
+            <button type="button" class="modal-close" onclick="closeModal('addCustomerModal')">&times;</button>
+        </div>
+        <form method="POST" action="{{ url_for('customer_add') }}">
+            <div class="modal-body">
+                <div class="form-group mb-3">
+                    <label for="new_cid">Customer ID (Integer)</label>
+                    <input type="number" id="new_cid" name="customer_id" class="form-control" required placeholder="e.g. 101">
+                </div>
+                <div class="form-group mb-3">
+                    <label for="new_cname">Full Name</label>
+                    <input type="text" id="new_cname" name="c_name" class="form-control" required placeholder="e.g. John Doe">
+                </div>
+                <div class="form-group mb-3">
+                    <label for="new_email">Email Address</label>
+                    <input type="email" id="new_email" name="email" class="form-control" required placeholder="e.g. john@example.com">
+                </div>
+                <div class="form-group">
+                    <label for="new_region">Region</label>
+                    <input type="text" id="new_region" name="region" class="form-control" required placeholder="e.g. North, South, Mumbai, Delhi">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('addCustomerModal')">Cancel</button>
+                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-check"></i> Register Customer</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function closeModal(id) {
+        document.getElementById(id).classList.add("d-none");
+    }
+
+    function openAddCustomerModal() {
+        document.getElementById("addCustomerModal").classList.remove("d-none");
+    }
+</script>
+{% endblock %}
+

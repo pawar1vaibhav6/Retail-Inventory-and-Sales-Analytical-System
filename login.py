@@ -1,24 +1,22 @@
+from db import verify_user
+
+
 def login():
-    users = {
-        "admin": {"password": "admin@123", "role": "admin"},
-        "cashier": {"password": "cashier@123", "role": "cashier"}
-    }
-
+    """Dynamic database-driven authentication for CLI."""
     for _ in range(3):
-        username = input("Username: ")
-
-        if username not in users:
-            print("User does not exist")
+        username = input("Username: ").strip()
+        if not username:
+            print("Username cannot be empty")
             continue
 
-        password = input("Password: ")
+        password = input("Password: ").strip()
 
-        if password == users[username]["password"]:
-            print(f"Welcome {username}")
-            return users[username]["role"]
+        user = verify_user(username, password)
+        if user:
+            print(f"Welcome {user['username']} ({user['role'].capitalize()})")
+            return user["role"]
 
         print("Invalid credentials")
 
     print("Access denied")
     return None
-

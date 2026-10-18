@@ -1,5 +1,6 @@
 import os
 import pymysql
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # MySQL Configuration (Configurable via environment variables or default settings)
 DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -23,6 +24,18 @@ def init_db():
             cur.execute(f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}`")
             cur.execute(f"USE `{DB_NAME}`")
 
+            # Users table for dynamic authentication
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS Users (
+                user_id INT PRIMARY KEY AUTO_INCREMENT,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                role VARCHAR(20) NOT NULL DEFAULT 'cashier',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+
+            # Products table
             cur.execute("""
             CREATE TABLE IF NOT EXISTS Products (
                 product_id INT PRIMARY KEY,
@@ -34,6 +47,7 @@ def init_db():
             )
             """)
 
+            # Customers table
             cur.execute("""
             CREATE TABLE IF NOT EXISTS Customers (
                 customer_id INT PRIMARY KEY,
@@ -43,6 +57,7 @@ def init_db():
             )
             """)
 
+            # Sales table
             cur.execute("""
             CREATE TABLE IF NOT EXISTS Sales (
                 sales_id INT PRIMARY KEY AUTO_INCREMENT,
@@ -57,6 +72,7 @@ def init_db():
             )
             """)
 
+            # Stock replenishment history table
             cur.execute("""
             CREATE TABLE IF NOT EXISTS stock (
                 product_id INT,
@@ -66,6 +82,22 @@ def init_db():
                 FOREIGN KEY (product_id) REFERENCES Products(product_id)
             )
             """)
+
+            # Seed default admin and cashier accounts if table is empty
+            cur.execute("SELECT COUNT(*) FROM Users")
+            count = cur.fetchone()[0]
+            if count == 0:
+                admin_hash = generate_password_hash("admin@123")
+                cashier_hash = generate_password_hash("cashier@123")
+                cur.execute(
+                    "INSERT INTO Users (username, password_hash, role) VALUES (%s, %s, %s)",
+                    ("admin", admin_hash, "admin")
+                )
+                cur.execute(
+                    "INSERT INTO Users (username, password_hash, role) VALUES (%s, %s, %s)",
+                    ("cashier", cashier_hash, "cashier")
+                )
+
         conn.close()
     except Exception as e:
         print(f"Database initialization error: {e}")
@@ -83,10 +115,50 @@ def get_connection():
     )
 
 
+def verify_user(username, password):
+    """Authenticate a user against the MySQL Users table."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id, username, password_hash, role FROM Users WHERE username = %s", (username,))
+            user = cur.fetchone()
+            if not user:
+                return None
+            user_id, uname, p_hash, role = user
+            if check_password_hash(p_hash, password):
+                return {"user_id": user_id, "username": uname, "role": role}
+            return None
+    finally:
+        conn.close()
+
+
+def register_user(username, password, role="cashier"):
+    """Register a new user into MySQL with a securely hashed password."""
+    if role not in ("admin", "cashier"):
+        role = "cashier"
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM Users WHERE username = %s", (username,))
+            if cur.fetchone():
+                return False, "Username already exists. Please choose a different one."
+            p_hash = generate_password_hash(password)
+            cur.execute(
+                "INSERT INTO Users (username, password_hash, role) VALUES (%s, %s, %s)",
+                (username, p_hash, role)
+            )
+            conn.commit()
+            return True, "User registered successfully."
+    except Exception as e:
+        conn.rollback()
+        return False, f"Failed to register user: {e}"
+    finally:
+        conn.close()
+
+
 # Run DB initialization
 init_db()
 
 # Module-level connection and cursor for application modules
 conn = get_connection()
 cursor = conn.cursor()
-

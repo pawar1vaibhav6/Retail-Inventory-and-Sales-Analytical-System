@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Register - RetailSphere Analytical System{% endblock %}
+
+{% block content %}
+<div class="auth-page">
+    <div class="auth-card">
+        <!-- Header -->
+        <div class="auth-header">
+            <div class="auth-icon-circle accent">
+                <i class="fa-solid fa-user-plus"></i>
+            </div>
+            <h2>Create Account</h2>
+            <p>Register a new user in the MySQL database</p>
+        </div>
+
+        <!-- Registration Form -->
+        <form id="registerForm" method="POST" action="{{ url_for('register') }}" class="auth-form">
+            <!-- Username Input -->
+            <div class="form-group">
+                <label for="reg-username">Username</label>
+                <div class="input-group">
+                    <span class="input-icon"><i class="fa-solid fa-user"></i></span>
+                    <input 
+                        type="text" 
+                        id="reg-username" 
+                        name="username" 
+                        class="form-control" 
+                        placeholder="Choose a username" 
+                        value="{{ username or '' }}" 
+                        required 
+                        autofocus
+                    >
+                </div>
+            </div>
+
+            <!-- Role Selection -->
+            <div class="form-group">
+                <label for="reg-role">Assign Role</label>
+                <div class="input-group">
+                    <span class="input-icon"><i class="fa-solid fa-id-badge"></i></span>
+                    <select id="reg-role" name="role" class="form-control">
+                        <option value="cashier" {% if role == 'cashier' %}selected{% endif %}>Cashier (Sales & Invoicing)</option>
+                        <option value="admin" {% if role == 'admin' %}selected{% endif %}>Admin (Inventory & Analytics)</option>
+                    </select>
+                </div>
+                <small class="form-hint">Admins have full access; Cashiers have sales access.</small>
+            </div>
+
+            <!-- Password Input -->
+            <div class="form-group">
+                <label for="reg-password">Password</label>
+                <div class="input-group">
+                    <span class="input-icon"><i class="fa-solid fa-lock"></i></span>
+                    <input 
+                        type="password" 
+                        id="reg-password" 
+                        name="password" 
+                        class="form-control" 
+                        placeholder="Create a password (min 4 characters)" 
+                        required
+                    >
+                </div>
+            </div>
+
+            <!-- Confirm Password Input -->
+            <div class="form-group">
+                <label for="reg-confirm">Confirm Password</label>
+                <div class="input-group">
+                    <span class="input-icon"><i class="fa-solid fa-check-double"></i></span>
+                    <input 
+                        type="password" 
+                        id="reg-confirm" 
+                        name="confirm_password" 
+                        class="form-control" 
+                        placeholder="Re-enter password" 
+                        required
+                    >
+                </div>
+                <div id="password-match-msg" class="form-hint d-none"></div>
+            </div>
+
+            <!-- Submit Button -->
+            <button type="submit" id="regSubmitBtn" class="btn btn-primary btn-block">
+                <i class="fa-solid fa-user-check"></i> Register Account
+            </button>
+        </form>
+
+        <!-- Footer -->
+        <div class="auth-footer">
+            <p>Already have an account? <a href="{{ url_for('login') }}" class="link-highlight">Sign In</a></p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

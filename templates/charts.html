@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+
+{% block title %}Interactive Analytics Charts - RetailSphere{% endblock %}
+
+{% block content %}
+<div class="charts-container">
+    <!-- Header -->
+    <div class="page-header">
+        <div>
+            <h2><i class="fa-solid fa-chart-column"></i> Interactive Visual Analytics</h2>
+            <p class="subtitle">Live responsive charts powered by Chart.js: trends, category distributions, and profitability curves.</p>
+        </div>
+        <div class="header-actions">
+            <div class="year-filter-form">
+                <label for="chartYearSelect" class="year-label"><i class="fa-regular fa-calendar"></i> Select Year:</label>
+                <select id="chartYearSelect" class="form-control form-control-sm">
+                    {% for yr in available_years %}
+                        <option value="{{ yr }}" {% if selected_year == yr %}selected{% endif %}>{{ yr }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <a href="{{ url_for('analytics') }}" class="btn btn-secondary btn-sm">
+                <i class="fa-solid fa-table"></i> Tabular Reports
+            </a>
+        </div>
+    </div>
+
+    <!-- Charts Grid (2x2) -->
+    <div class="charts-grid">
+        <!-- 1. Monthly Revenue & Profit -->
+        <div class="chart-card">
+            <div class="chart-header">
+                <h4><i class="fa-solid fa-chart-bar"></i> Monthly Revenue, Cost & Profit</h4>
+                <span class="badge badge-primary">Bar Chart</span>
+            </div>
+            <div class="chart-body">
+                <canvas id="monthlyChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 2. Category Distribution -->
+        <div class="chart-card">
+            <div class="chart-header">
+                <h4><i class="fa-solid fa-chart-pie"></i> Revenue by Category</h4>
+                <span class="badge badge-success">Doughnut</span>
+            </div>
+            <div class="chart-body">
+                <canvas id="categoryChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 3. Daily Sales Trend -->
+        <div class="chart-card">
+            <div class="chart-header">
+                <h4><i class="fa-solid fa-chart-line"></i> Daily Sales Trend (Recent 14 Days)</h4>
+                <span class="badge badge-info">Line Trend</span>
+            </div>
+            <div class="chart-body">
+                <canvas id="dailyChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 4. Weekly Sales Comparison -->
+        <div class="chart-card">
+            <div class="chart-header">
+                <h4><i class="fa-solid fa-calendar-week"></i> Weekly Sales Volume</h4>
+                <span class="badge badge-warning">Weekly</span>
+            </div>
+            <div class="chart-body">
+                <canvas id="weeklyChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let monthlyChartInstance = null;
+    let categoryChartInstance = null;
+    let dailyChartInstance = null;
+    let weeklyChartInstance = null;
+
+    const yearSelect = document.getElementById("chartYearSelect");
+
+    async function loadCharts(year) {
+        try {
+            const res = await fetch(`/api/chart-data?year=${year}`);
+            const data = await res.json();
+
+            renderMonthlyChart(data.monthly);
+            renderCategoryChart(data.category);
+            renderDailyChart(data.daily);
+            renderWeeklyChart(data.weekly);
+        } catch (e) {
+            console.error("Failed to load chart data:", e);
+        }
+    }
+
+    function renderMonthlyChart(m) {
+        const ctx = document.getElementById("monthlyChart").getContext("2d");
+        if (monthlyChartInstance) monthlyChartInstance.destroy();
+
+        monthlyChartInstance = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels: m.labels.length ? m.labels : ["No Data"],
+                datasets: [
+                    {
+                        label: "Revenue (₹)",
+                        data: m.revenue.length ? m.revenue : [0],
+                        backgroundColor: "rgba(79, 70, 229, 0.75)",
+                        borderColor: "#4f46e5",
+                        borderWidth: 1.5,
+                        borderRadius: 6
+                    },
+                    {
+                        label: "Cost (₹)",
+                        data: m.cost.length ? m.cost : [0],
+                        backgroundColor: "rgba(148, 163, 184, 0.7)",
+                        borderColor: "#94a3b8",
+                        borderWidth: 1.5,
+                        borderRadius: 6
+                    },
+                    {
+                        label: "Profit (₹)",
+                        data: m.profit.length ? m.profit : [0],
+                        backgroundColor: "rgba(16, 185, 129, 0.8)",
+                        borderColor: "#10b981",
+                        borderWidth: 1.5,
+                        borderRadius: 6
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: "top" }
+                },
+                scales: {
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+    }
+
+    function renderCategoryChart(c) {
+        const ctx = document.getElementById("categoryChart").getContext("2d");
+        if (categoryChartInstance) categoryChartInstance.destroy();
+
+        categoryChartInstance = new Chart(ctx, {
+            type: "doughnut",
+            data: {
+                labels: c.labels.length ? c.labels : ["No Sales"],
+                datasets: [{
+                    data: c.revenue.length ? c.revenue : [1],
+                    backgroundColor: [
+                        "#4f46e5", "#06b6d4", "#10b981", "#f59e0b", 
+                        "#ec4899", "#8b5cf6", "#14b8a6", "#f97316"
+                    ],
+                    borderWidth: 2,
+                    borderColor: "#ffffff"
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: "right" }
+                }
+            }
+        });
+    }
+
+    function renderDailyChart(d) {
+        const ctx = document.getElementById("dailyChart").getContext("2d");
+        if (dailyChartInstance) dailyChartInstance.destroy();
+
+        dailyChartInstance = new Chart(ctx, {
+            type: "line",
+            data: {
+                labels: d.labels.length ? d.labels : ["No Sales"],
+                datasets: [{
+                    label: "Daily Revenue (₹)",
+                    data: d.sales.length ? d.sales : [0],
+                    borderColor: "#0ea5e9",
+                    backgroundColor: "rgba(14, 165, 233, 0.15)",
+                    fill: true,
+                    tension: 0.35,
+                    borderWidth: 2.5,
+                    pointBackgroundColor: "#0ea5e9",
+                    pointRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+    }
+
+    function renderWeeklyChart(w) {
+        const ctx = document.getElementById("weeklyChart").getContext("2d");
+        if (weeklyChartInstance) weeklyChartInstance.destroy();
+
+        weeklyChartInstance = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels: w.labels.length ? w.labels : ["No Sales"],
+                datasets: [{
+                    label: "Weekly Sales (₹)",
+                    data: w.sales.length ? w.sales : [0],
+                    backgroundColor: "rgba(245, 158, 11, 0.8)",
+                    borderColor: "#d97706",
+                    borderWidth: 1.5,
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+    }
+
+    yearSelect.addEventListener("change", () => {
+        loadCharts(yearSelect.value);
+    });
+
+    // Initial load
+    document.addEventListener("DOMContentLoaded", () => {
+        loadCharts(yearSelect.value);
+    });
+</script>
+{% endblock %}
+

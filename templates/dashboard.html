@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - RetailSphere Analytical System{% endblock %}
+
+{% block content %}
+<div class="dashboard-page">
+    <!-- Welcome Header Banner -->
+    <div class="welcome-card">
+        <div class="welcome-info">
+            <div class="avatar-circle">
+                <i class="fa-solid fa-user-astronaut"></i>
+            </div>
+            <div>
+                <h1>Welcome back, <span class="highlight-text">{{ user.username }}</span>!</h1>
+                <p class="subtitle">System Status: <span class="status-online"><i class="fa-solid fa-circle"></i> Connected to MySQL (<code>sql_class</code>)</span></p>
+            </div>
+        </div>
+        <div class="welcome-role">
+            <span class="role-badge large role-{{ user.role }}">
+                <i class="fa-solid {% if user.role == 'admin' %}fa-shield-halved{% else %}fa-cash-register{% endif %}"></i>
+                {{ user.role|upper }} PORTAL
+            </span>
+        </div>
+    </div>
+
+    <!-- Quick Stats Grid -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon icon-products">
+                <i class="fa-solid fa-boxes-stacked"></i>
+            </div>
+            <div class="stat-details">
+                <span class="stat-label">Total Products</span>
+                <span class="stat-value">{{ stats.products_count }}</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon icon-customers">
+                <i class="fa-solid fa-users"></i>
+            </div>
+            <div class="stat-details">
+                <span class="stat-label">Total Customers</span>
+                <span class="stat-value">{{ stats.customers_count }}</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon icon-sales">
+                <i class="fa-solid fa-receipt"></i>
+            </div>
+            <div class="stat-details">
+                <span class="stat-label">Sales Recorded</span>
+                <span class="stat-value">{{ stats.sales_count }}</span>
+            </div>
+        </div>
+
+        <div class="stat-card {% if stats.low_stock_count > 0 %}alert-stat{% endif %}">
+            <div class="stat-icon icon-alerts">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <div class="stat-details">
+                <span class="stat-label">Low Stock Alerts (&lt; 5)</span>
+                <span class="stat-value">{{ stats.low_stock_count }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Content Sections: Split Grid -->
+    <div class="dashboard-grid">
+        <!-- Left: Quick Actions & Role Privileges -->
+        <div class="dashboard-panel">
+            <div class="panel-header">
+                <h3><i class="fa-solid fa-compass"></i> System Modules & Fast Navigation</h3>
+            </div>
+            <div class="panel-body">
+                <p class="panel-desc">
+                    Your active role is <strong>{{ user.role|capitalize }}</strong>.
+                    {% if user.role == 'admin' %}
+                        You have unrestricted administrative authority across inventory, stock replenishment, analytical reports, and visualizations.
+                    {% else %}
+                        You have operational authority for sales processing, customer billing, and stock availability checks.
+                    {% endif %}
+                </p>
+
+                <div class="modules-list">
+                    <a href="{{ url_for('pos') }}" class="module-item active text-decoration-none">
+                        <div class="module-info">
+                            <i class="fa-solid fa-cart-shopping module-icon"></i>
+                            <div>
+                                <h4>POS & Tax Invoicing</h4>
+                                <span>Process customer sales, compute GST & print tax invoices</span>
+                            </div>
+                        </div>
+                        <span class="btn btn-sm btn-primary">Open POS <i class="fa-solid fa-arrow-right"></i></span>
+                    </a>
+
+                    {% if user.role == 'admin' %}
+                    <a href="{{ url_for('products') }}" class="module-item active text-decoration-none">
+                        <div class="module-info">
+                            <i class="fa-solid fa-dolly module-icon"></i>
+                            <div>
+                                <h4>Inventory & Product Catalog</h4>
+                                <span>Add new products, adjust pricing, update replenishment stock</span>
+                            </div>
+                        </div>
+                        <span class="btn btn-sm btn-outline-primary">Manage <i class="fa-solid fa-arrow-right"></i></span>
+                    </a>
+                    {% endif %}
+
+                    <a href="{{ url_for('customers') }}" class="module-item active text-decoration-none">
+                        <div class="module-info">
+                            <i class="fa-solid fa-users module-icon"></i>
+                            <div>
+                                <h4>Customer Profiles</h4>
+                                <span>Directory of all registered buyers and their regions</span>
+                            </div>
+                        </div>
+                        <span class="btn btn-sm btn-outline-primary">View <i class="fa-solid fa-arrow-right"></i></span>
+                    </a>
+
+                    {% if user.role == 'admin' %}
+                    <a href="{{ url_for('analytics') }}" class="module-item active text-decoration-none">
+                        <div class="module-info">
+                            <i class="fa-solid fa-chart-pie module-icon"></i>
+                            <div>
+                                <h4>Sales Analytics & Tabular Reports</h4>
+                                <span>Daily, weekly, monthly trends, profit margins & GST reports</span>
+                            </div>
+                        </div>
+                        <span class="btn btn-sm btn-outline-primary">Reports <i class="fa-solid fa-arrow-right"></i></span>
+                    </a>
+
+                    <a href="{{ url_for('charts') }}" class="module-item active text-decoration-none">
+                        <div class="module-info">
+                            <i class="fa-solid fa-chart-column module-icon"></i>
+                            <div>
+                                <h4>Interactive Visual Charts</h4>
+                                <span>Dynamic Chart.js revenue curves, margins and category breakdown</span>
+                            </div>
+                        </div>
+                        <span class="btn btn-sm btn-outline-primary">Charts <i class="fa-solid fa-arrow-right"></i></span>
+                    </a>
+                    {% endif %}
+                </div>
+
+                <div class="cli-notice">
+                    <i class="fa-solid fa-terminal"></i>
+                    <div>
+                        <strong>CLI Terminal Mode:</strong> You can also run the full interactive terminal application at any time with <code>python main.py</code> using your same credentials!
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Recent Activity / Low Stock Alerts -->
+        <div class="dashboard-panel">
+            <div class="panel-header flex-between">
+                <h3><i class="fa-solid fa-clock-rotate-left"></i> Recent Sales Transactions</h3>
+                <a href="{{ url_for('pos') }}" class="btn btn-sm btn-success">
+                    <i class="fa-solid fa-plus"></i> New Sale
+                </a>
+            </div>
+            <div class="panel-body">
+                {% if stats.recent_sales %}
+                    <div class="table-responsive">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Bill #</th>
+                                    <th>Product</th>
+                                    <th>Qty</th>
+                                    <th>Total</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for sale in stats.recent_sales %}
+                                    <tr>
+                                        <td><span class="code-pill">#{{ sale[0] }}</span></td>
+                                        <td><strong>{{ sale[1] or 'N/A' }}</strong></td>
+                                        <td>{{ sale[2] }}</td>
+                                        <td class="text-success font-bold">₹{{ "{:,.2f}".format(sale[3]) }}</td>
+                                        <td class="text-muted">{{ sale[5].strftime('%d-%b %H:%M') if sale[5] else 'Recently' }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="empty-state">
+                        <i class="fa-solid fa-receipt empty-icon"></i>
+                        <p>No sales recorded yet. Click <strong>"New Sale"</strong> above to record your first transaction!</p>
+                    </div>
+                {% endif %}
+
+                {% if stats.low_stock_items %}
+                    <div class="subpanel-title mt-4">
+                        <i class="fa-solid fa-bell text-warning"></i> Warehouse Low Stock Alerts (&lt; 5)
+                    </div>
+                    <div class="table-responsive">
+                        <table class="data-table alert-table">
+                            <thead>
+                                <tr>
+                                    <th>Product</th>
+                                    <th>Category</th>
+                                    <th>Stock</th>
+                                    {% if user.role == 'admin' %}<th>Action</th>{% endif %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in stats.low_stock_items %}
+                                    <tr>
+                                        <td><strong>{{ item[1] }}</strong></td>
+                                        <td>{{ item[2] }}</td>
+                                        <td class="text-danger font-bold">{{ item[4] }}</td>
+                                        {% if user.role == 'admin' %}
+                                        <td>
+                                            <a href="{{ url_for('products') }}" class="btn btn-sm btn-outline-success">Restock</a>
+                                        </td>
+                                        {% endif %}
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

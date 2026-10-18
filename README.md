@@ -118,6 +118,13 @@ Connection settings can be configured via environment variables or directly in `
 
 5. Run the Application
 
+**Option A: Web Portal (Dynamic Web Login & Dashboard)**
+```bash
+python app.py
+```
+Then visit `http://127.0.0.1:5000` in your web browser.
+
+**Option B: CLI Terminal Interface**
 ```bash
 python main.py
 ```
@@ -130,16 +137,14 @@ python main.py
 | Admin   | admin    | admin@123   |
 | Cashier | cashier  | cashier@123 |
 
- Credentials are hardcoded for learning purposes only.
+> Credentials are dynamically authenticated against the MySQL `Users` table with secure password hashing (`scrypt`/`pbkdf2`). New users can be registered dynamically via the web portal or database.
 
 ---
 ##  Future Enhancements
 
-- Database-driven user authentication
-- Password hashing and improved security
 - Configurable GST rates
 - Export reports to Excel/PDF
-- GUI or web-based interface
+- Full web-based billing & POS checkout interface
 - Logging and auditing
 - Unit and integration testing
 
