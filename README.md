@@ -1,6 +1,6 @@
 #  Retail Inventory and Sales Analytical System
 
-A **console-based Retail Inventory and Sales Analytical System** built using **Python** and **Microsoft SQL Server**, designed to manage products, customers, sales transactions, inventory, GST calculations, and business analytics.
+A **console-based Retail Inventory and Sales Analytical System** built using **Python** and **MySQL**, designed to manage products, customers, sales transactions, inventory, GST calculations, and business analytics.
 
 This project models a **real-world retail backend system**, combining transactional processing with analytical reporting.
 
@@ -70,8 +70,8 @@ This project models a **real-world retail backend system**, combining transactio
 ##  Tech Stack
 
 - **Programming Language:** Python
-- **Database:** Microsoft SQL Server
-- **Database Connectivity:** pyodbc
+- **Database:** MySQL
+- **Database Connectivity:** PyMySQL
 - **Data Analysis:** Pandas
 - **Visualization:** Matplotlib
 - **Application Type:** Console-based
@@ -81,39 +81,45 @@ This project models a **real-world retail backend system**, combining transactio
 ##   Setup Instructions
 1. Prerequisites
 
-- Python 
-
-- Microsoft SQL Server
-
-- ODBC Driver 18 for SQL Server
+- Python 3.8+
+- MySQL Server 8.0+
 
 2. Install Required Packages
 
 ```bash
-    pip install pyodbc pandas matplotlib
+pip install -r requirements.txt
 ```
+or:
+```bash
+pip install pymysql pandas matplotlib
+```
+
 3. Database Setup
 
-- Create a database named sql_class
+- Start your local MySQL service.
+- The system automatically creates the `sql_class` database and required tables upon running the application.
+- Alternatively, you can manually execute `SQLQuery.sql` in MySQL Workbench or MySQL CLI:
 
-- Execute the SQL schema scripts to create tables
-
-- Ensure trusted connection is enabled for SQL Server
+```bash
+mysql -u root -p < SQLQuery.sql
+```
 
 4. Configure Database Connection
 
-Update the connection string in all modules if required:
+Connection settings can be configured via environment variables or directly in `db.py`:
 
-```bash
-    Server=localhost;
-    Database=sql_class;
-    Trusted_Connection=yes;
-```
+| Parameter | Environment Variable | Default |
+|-----------|----------------------|---------|
+| Host | `DB_HOST` | `localhost` |
+| User | `DB_USER` | `root` |
+| Password | `DB_PASSWORD` | `root` |
+| Database | `DB_NAME` | `sql_class` |
+| Port | `DB_PORT` | `3306` |
 
 5. Run the Application
 
 ```bash
-    python main.py
+python main.py
 ```
 
 ---
@@ -130,17 +136,11 @@ Update the connection string in all modules if required:
 ##  Future Enhancements
 
 - Database-driven user authentication
-
 - Password hashing and improved security
-
 - Configurable GST rates
-
 - Export reports to Excel/PDF
-
 - GUI or web-based interface
-
 - Logging and auditing
-
 - Unit and integration testing
 
 ---
@@ -151,4 +151,3 @@ The Retail Inventory and Sales Analytical System demonstrates a complete retail 
 ---
 ## Author
 ### Vaibhav Pawar
-

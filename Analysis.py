@@ -1,91 +1,90 @@
-import pyodbc
-import pandas as pd
-import matplotlib.pyplot as plt
 import warnings
+import pandas as pd
+from db import conn, cursor
+
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
-conn = pyodbc.connect(
-    "Driver={ODBC Driver 18 for SQL Server};"
-    "Server=localhost;"
-    "Database=sql_class;"
-    "Trusted_Connection=yes;"
-    "TrustServerCertificate=yes;"
-)
-
-cursor=conn.cursor()
-
 def low_stock():
-    query="""
+    query = """
     SELECT product_id, p_name, category, stock_quantity
     FROM Products
     WHERE stock_quantity < 5
     """
-    df=pd.read_sql_query(query,conn)
+    df = pd.read_sql_query(query, conn)
     if df.empty:
         print("All products have sufficient stock")
     else:
         print("Low stock products:")
         print(df)
 
+
 def monthly_sale(year):
-    query="""Select datepart(M,Date) as MonthNo,datename(M,s.Date) as Month,sum(s.total_amount)as Revenue,sum(p.cost*s.quantity) as Cost,sum(s.total_amount-(p.cost*s.quantity)) as Profit 
-            from Sales s Join Products p
-            on s.product_id=p.product_id
-            where datepart(yy,s.date)=?
-            group by datepart(M,Date),datename(M,Date)
+    query = """SELECT MONTH(s.Date) AS MonthNo, MONTHNAME(s.Date) AS Month, SUM(s.total_amount) AS Revenue, SUM(p.cost*s.quantity) AS Cost, SUM(s.total_amount-(p.cost*s.quantity)) AS Profit 
+            FROM Sales s JOIN Products p
+            ON s.product_id=p.product_id
+            WHERE YEAR(s.Date)=%s
+            GROUP BY MONTH(s.Date), MONTHNAME(s.Date)
             ORDER BY MonthNo"""
-    
-    df=pd.read_sql_query(query,conn,params=(year))
+
+    df = pd.read_sql_query(query, conn, params=(year,))
     print(df)
+
 
 def daily_sale():
-    query="""Select cast(date as Date) as [Date],sum(s.total_amount)as Revenue,sum(p.cost*s.quantity) as Cost,sum(s.total_amount-(p.cost*s.quantity)) as Profit 
-                from Sales s Join Products p
-                on s.product_id=p.product_id
-                group by cast(date as Date)"""
-    
-    df=pd.read_sql_query(query,conn)
+    query = """SELECT CAST(s.Date AS DATE) AS `Date`, SUM(s.total_amount) AS Revenue, SUM(p.cost*s.quantity) AS Cost, SUM(s.total_amount-(p.cost*s.quantity)) AS Profit 
+            FROM Sales s JOIN Products p
+            ON s.product_id=p.product_id
+            GROUP BY CAST(s.Date AS DATE)"""
+
+    df = pd.read_sql_query(query, conn)
     print(df)
+
 
 def weekly_sale(year):
-    query="""Select datepart(wk,date) as [Week],sum(s.total_amount)as Revenue,sum(p.cost*s.quantity) as Cost,sum(s.total_amount-(p.cost*s.quantity)) as Profit 
-            from Sales s Join Products p
-            on s.product_id=p.product_id
-            where datepart(yy,s.date)=?
-            group by datepart(wk,date)"""
-    
-    df=pd.read_sql_query(query,conn,params=(year))
+    query = """SELECT WEEK(s.Date) AS `Week`, SUM(s.total_amount) AS Revenue, SUM(p.cost*s.quantity) AS Cost, SUM(s.total_amount-(p.cost*s.quantity)) AS Profit 
+            FROM Sales s JOIN Products p
+            ON s.product_id=p.product_id
+            WHERE YEAR(s.Date)=%s
+            GROUP BY WEEK(s.Date)"""
+
+    df = pd.read_sql_query(query, conn, params=(year,))
     print(df)
+
 
 def category_sale():
-    query="""Select p.category,sum(s.total_amount)as Revenue,sum(p.cost*s.quantity) as Cost,sum(s.total_amount-(p.cost*s.quantity)) as Profit 
-            from Sales s Join Products p
-            on s.product_id=p.product_id
-            group by category"""
+    query = """SELECT p.category, SUM(s.total_amount) AS Revenue, SUM(p.cost*s.quantity) AS Cost, SUM(s.total_amount-(p.cost*s.quantity)) AS Profit 
+            FROM Sales s JOIN Products p
+            ON s.product_id=p.product_id
+            GROUP BY p.category"""
 
-    df=pd.read_sql_query(query,conn)
+    df = pd.read_sql_query(query, conn)
     print(df)
+
 
 def product_sale():
-    query="""Select p.p_name,sum(s.total_amount)as Revenue,sum(p.cost*s.quantity) as Cost,sum(s.total_amount-(p.cost*s.quantity)) as Profit 
-            from Sales s Join Products p
-            on s.product_id=p.product_id
-            group by p.p_name"""
+    query = """SELECT p.p_name, SUM(s.total_amount) AS Revenue, SUM(p.cost*s.quantity) AS Cost, SUM(s.total_amount-(p.cost*s.quantity)) AS Profit 
+            FROM Sales s JOIN Products p
+            ON s.product_id=p.product_id
+            GROUP BY p.p_name"""
 
-    df=pd.read_sql_query(query,conn)
+    df = pd.read_sql_query(query, conn)
     print(df)
 
-def inventory_value():
-    query="select sum(price*stock_quantity) from Products"
 
+def inventory_value():
+    query = "SELECT SUM(price*stock_quantity) FROM Products"
     cursor.execute(query)
-    row=cursor.fetchone()
-    print(f"Total Inventory Value:{row[0]}")
+    row = cursor.fetchone()
+    val = row[0] if row and row[0] is not None else 0
+    print(f"Total Inventory Value:{val}")
+
 
 def monthly_gst(year):
-    query="""Select datename(M,Date) as Month,sum(gst_amount) as [Total Gst] from Sales
-            where datepart(YYYY,Date)=?
-            group by datename(M,Date)"""
-    df=pd.read_sql_query(query,conn,params=(year,))
+    query = """SELECT MONTHNAME(Date) AS Month, SUM(gst_amount) AS `Total Gst` 
+            FROM Sales
+            WHERE YEAR(Date)=%s
+            GROUP BY MONTH(Date), MONTHNAME(Date)
+            ORDER BY MONTH(Date)"""
+    df = pd.read_sql_query(query, conn, params=(year,))
     print(df)
