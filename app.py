@@ -5,7 +5,7 @@ from flask import (
     Flask, render_template, request, redirect, url_for, session, flash, jsonify
 )
 import db
-from db import verify_user, register_user, get_connection
+from db import verify_user, register_user, get_connection, get_product_unit, normalize_subcategory
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "retail-inventory-analytical-system-secret-key-2026")
@@ -183,12 +183,12 @@ def dashboard():
             cur.execute("SELECT COALESCE(SUM(price * stock_quantity), 0) FROM Products")
             stats["inventory_value"] = cur.fetchone()[0]
 
-            cur.execute("SELECT product_id, p_name, category, price, stock_quantity FROM Products WHERE stock_quantity < 5 ORDER BY stock_quantity ASC")
+            cur.execute("SELECT product_id, p_name, category, price, stock_quantity, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing') FROM Products WHERE stock_quantity < 5 ORDER BY stock_quantity ASC")
             stats["low_stock_items"] = cur.fetchall()
             stats["low_stock_count"] = len(stats["low_stock_items"])
 
             cur.execute("""
-                SELECT s.sales_id, p.p_name, s.quantity, s.total_amount, s.gst_amount, s.Date 
+                SELECT s.sales_id, p.p_name, s.quantity, s.total_amount, s.gst_amount, s.Date, COALESCE(p.unit, 'pcs') AS unit 
                 FROM Sales s 
                 LEFT JOIN Products p ON s.product_id = p.product_id 
                 ORDER BY s.sales_id DESC LIMIT 5
@@ -214,7 +214,7 @@ def pos():
     customers = []
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT product_id, p_name, category, price, stock_quantity FROM Products ORDER BY p_name ASC")
+            cur.execute("SELECT product_id, p_name, category, price, stock_quantity, COALESCE(unit, 'pcs') AS unit, COALESCE(subcategory, 'Packing') AS subcategory FROM Products ORDER BY p_name ASC")
             products = cur.fetchall()
 
             cur.execute("SELECT customer_id, c_name, email, region FROM Customers ORDER BY c_name ASC")
@@ -242,7 +242,22 @@ def pos_checkout():
             cur.execute("SELECT customer_id, c_name, email, region FROM Customers WHERE customer_id = %s", (customer_id,))
             customer = cur.fetchone()
             if not customer:
-                return jsonify({"success": False, "message": f"Customer ID #{customer_id} does not exist."}), 400
+                c_name = (data.get("customer_name") or data.get("c_name") or data.get("name") or "").strip()
+                email = (data.get("customer_email") or data.get("email") or f"customer{customer_id}@retail.com").strip()
+                region = (data.get("customer_region") or data.get("region") or "General").strip()
+
+                if c_name:
+                    cur.execute(
+                        "INSERT INTO Customers (customer_id, c_name, email, region) VALUES (%s, %s, %s, %s)",
+                        (customer_id, c_name, email, region)
+                    )
+                    customer = (customer_id, c_name, email, region)
+                else:
+                    return jsonify({
+                        "success": False,
+                        "customer_not_found": True,
+                        "message": f"Customer ID #{customer_id} does not exist. Please provide customer name and region to register."
+                    }), 400
 
             bill_items = []
             total_bill_amount = 0
@@ -257,18 +272,20 @@ def pos_checkout():
                 if qty <= 0:
                     continue
 
-                cur.execute("SELECT p_name, category, price, stock_quantity FROM Products WHERE product_id = %s FOR UPDATE", (pid,))
+                cur.execute("SELECT p_name, category, price, stock_quantity, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing') FROM Products WHERE product_id = %s FOR UPDATE", (pid,))
                 prod = cur.fetchone()
                 if not prod:
                     conn.rollback()
                     return jsonify({"success": False, "message": f"Product #{pid} not found."}), 400
 
-                p_name, category, price, stock_qty = prod
+                p_name, category, price, stock_qty, raw_unit, raw_subcat = prod
+                unit = get_product_unit(category, p_name, explicit_unit=raw_unit, subcategory=raw_subcat)
+
                 if qty > stock_qty:
                     conn.rollback()
                     return jsonify({
                         "success": False, 
-                        "message": f"Not enough stock for '{p_name}'. Available: {stock_qty}, Requested: {qty}"
+                        "message": f"Not enough stock for '{p_name}'. Available: {stock_qty} {unit}, Requested: {qty} {unit}"
                     }), 400
 
                 # Compute GST
@@ -292,8 +309,11 @@ def pos_checkout():
                     "product_id": pid,
                     "name": p_name,
                     "category": category,
+                    "subcategory": raw_subcat,
+                    "unit": unit,
                     "price": price,
                     "quantity": qty,
+                    "quantity_display": f"{qty} {unit}",
                     "subtotal": item_subtotal,
                     "gst_rate": int(gst_rate * 100),
                     "gst_amount": item_gst,
@@ -342,16 +362,23 @@ def pos_checkout():
 def products():
     search = request.args.get("search", "").strip()
     category = request.args.get("category", "").strip()
+    subcategory = request.args.get("subcategory", "").strip()
 
     conn = get_connection()
     products_list = []
     categories = []
+    subcategories = []
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT DISTINCT category FROM Products WHERE category IS NOT NULL AND category != '' ORDER BY category")
             categories = [r[0] for r in cur.fetchall()]
 
-            query = "SELECT product_id, p_name, category, price, stock_quantity, cost FROM Products WHERE 1=1"
+            cur.execute("SELECT DISTINCT subcategory FROM Products WHERE subcategory IS NOT NULL AND subcategory != '' ORDER BY subcategory")
+            subcategories = [r[0] for r in cur.fetchall()]
+            if not subcategories:
+                subcategories = ["Packing", "Open"]
+
+            query = "SELECT product_id, p_name, category, price, stock_quantity, cost, COALESCE(unit, 'pcs') AS unit, COALESCE(subcategory, 'Packing') AS subcategory FROM Products WHERE 1=1"
             params = []
 
             if search:
@@ -362,13 +389,25 @@ def products():
                 query += " AND category = %s"
                 params.append(category)
 
+            if subcategory:
+                query += " AND subcategory = %s"
+                params.append(subcategory)
+
             query += " ORDER BY product_id ASC"
             cur.execute(query, params)
             products_list = cur.fetchall()
     finally:
         conn.close()
 
-    return render_template("products.html", products=products_list, categories=categories, search=search, selected_category=category)
+    return render_template(
+        "products.html", 
+        products=products_list, 
+        categories=categories, 
+        subcategories=subcategories,
+        search=search, 
+        selected_category=category,
+        selected_subcategory=subcategory
+    )
 
 
 @app.route("/products/add", methods=["POST"])
@@ -379,6 +418,10 @@ def product_add():
         pid = int(request.form.get("product_id"))
         p_name = request.form.get("p_name", "").strip()
         category = request.form.get("category", "").strip()
+        subcat_input = request.form.get("subcategory", "Packing").strip()
+        subcategory = normalize_subcategory(subcat_input)
+        unit_input = request.form.get("unit", "").strip()
+        unit = get_product_unit(category, p_name, explicit_unit=unit_input, subcategory=subcategory)
         price = int(request.form.get("price"))
         stock = int(request.form.get("stock_quantity"))
         cost = int(request.form.get("cost"))
@@ -387,11 +430,11 @@ def product_add():
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO Products (product_id, p_name, category, price, stock_quantity, cost) VALUES (%s, %s, %s, %s, %s, %s)",
-                    (pid, p_name, category, price, stock, cost)
+                    "INSERT INTO Products (product_id, p_name, category, subcategory, price, stock_quantity, cost, unit) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    (pid, p_name, category, subcategory, price, stock, cost, unit)
                 )
                 conn.commit()
-                flash(f"Product '{p_name}' (#{pid}) added successfully.", "success")
+                flash(f"Product '{p_name}' (#{pid}) added successfully: [{subcategory}] with unit '{unit}'.", "success")
         except pymysql.err.IntegrityError:
             conn.rollback()
             flash(f"Product ID #{pid} already exists. Please choose a different ID.", "danger")
@@ -443,13 +486,14 @@ def product_restock():
         conn = get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT cost, p_name FROM Products WHERE product_id = %s", (pid,))
+                cur.execute("SELECT cost, p_name, category, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing') FROM Products WHERE product_id = %s", (pid,))
                 row = cur.fetchone()
                 if not row:
                     flash(f"Product #{pid} not found.", "danger")
                     return redirect(url_for("products"))
 
-                cost, p_name = row
+                cost, p_name, cat, raw_unit, raw_subcat = row
+                unit = get_product_unit(cat, p_name, explicit_unit=raw_unit, subcategory=raw_subcat)
                 total_restock_cost = cost * added_stock
 
                 cur.execute("UPDATE Products SET stock_quantity = stock_quantity + %s WHERE product_id = %s", (added_stock, pid))
@@ -458,7 +502,7 @@ def product_restock():
                     (pid, added_stock, total_restock_cost)
                 )
                 conn.commit()
-                flash(f"Restocked {added_stock} units for '{p_name}'. Replenishment cost: ₹{total_restock_cost}.", "success")
+                flash(f"Restocked {added_stock} {unit} for '{p_name}' [{raw_subcat}]. Replenishment cost: ₹{total_restock_cost}.", "success")
         finally:
             conn.close()
     except Exception as e:
@@ -526,6 +570,76 @@ def customer_add():
     return redirect(url_for("customers"))
 
 
+@app.route("/api/customers/quick-add", methods=["POST"])
+@login_required
+def api_customer_quick_add():
+    data = request.get_json(silent=True) or request.form
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cid = data.get("customer_id")
+            if not cid:
+                cur.execute("SELECT COALESCE(MAX(customer_id), 100) + 1 FROM Customers")
+                cid = cur.fetchone()[0]
+            else:
+                cid = int(cid)
+
+            c_name = data.get("c_name", "").strip()
+            if not c_name:
+                return jsonify({"success": False, "message": "Customer name is required."}), 400
+
+            email = data.get("email", "").strip() or f"customer{cid}@retail.com"
+            region = data.get("region", "").strip() or "General"
+
+            cur.execute("SELECT customer_id FROM Customers WHERE customer_id = %s", (cid,))
+            if cur.fetchone():
+                return jsonify({"success": False, "message": f"Customer ID #{cid} already exists."}), 400
+
+            cur.execute(
+                "INSERT INTO Customers (customer_id, c_name, email, region) VALUES (%s, %s, %s, %s)",
+                (cid, c_name, email, region)
+            )
+            conn.commit()
+            return jsonify({
+                "success": True,
+                "message": f"Customer '{c_name}' registered successfully.",
+                "customer": {
+                    "id": cid,
+                    "name": c_name,
+                    "email": email,
+                    "region": region
+                }
+            })
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": f"Failed to add customer: {e}"}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/customers/check/<int:customer_id>")
+@login_required
+def api_customer_check(customer_id):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT customer_id, c_name, email, region FROM Customers WHERE customer_id = %s", (customer_id,))
+            row = cur.fetchone()
+            if row:
+                return jsonify({
+                    "exists": True,
+                    "customer": {
+                        "id": row[0],
+                        "name": row[1],
+                        "email": row[2],
+                        "region": row[3]
+                    }
+                })
+            return jsonify({"exists": False, "customer_id": customer_id})
+    finally:
+        conn.close()
+
+
 # -------------------------------------------------------------------------
 # Analytics & Reports (Admin)
 # -------------------------------------------------------------------------
@@ -559,7 +673,7 @@ def analytics():
             data["available_years"] = years_found if years_found else [current_year]
 
             # 1. Low stock
-            cur.execute("SELECT product_id, p_name, category, price, stock_quantity FROM Products WHERE stock_quantity < 5 ORDER BY stock_quantity ASC")
+            cur.execute("SELECT product_id, p_name, category, price, stock_quantity, COALESCE(unit, 'pcs') AS unit, COALESCE(subcategory, 'Packing') AS subcategory FROM Products WHERE stock_quantity < 5 ORDER BY stock_quantity ASC")
             data["low_stock"] = cur.fetchall()
 
             # 2. Monthly sales
@@ -621,10 +735,11 @@ def analytics():
                 SELECT p.p_name, 
                        SUM(s.quantity) AS TotalQty, 
                        SUM(s.total_amount) AS Revenue, 
-                       SUM(s.total_amount - (p.cost * s.quantity)) AS Profit 
+                       SUM(s.total_amount - (p.cost * s.quantity)) AS Profit,
+                       COALESCE(p.unit, 'pcs') AS unit
                 FROM Sales s 
                 JOIN Products p ON s.product_id = p.product_id 
-                GROUP BY p.p_name 
+                GROUP BY p.p_name, p.unit 
                 ORDER BY Revenue DESC LIMIT 10
             """)
             data["product_sales"] = cur.fetchall()

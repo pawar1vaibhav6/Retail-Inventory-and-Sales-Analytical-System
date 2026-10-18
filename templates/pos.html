@@ -11,8 +11,11 @@
             <p class="subtitle">Process customer transactions, auto-calculate GST, deduct inventory, and issue tax invoices.</p>
         </div>
         <div class="header-actions">
-            <a href="{{ url_for('customers') }}" class="btn btn-outline-primary btn-sm">
-                <i class="fa-solid fa-user-plus"></i> Customer Directory
+            <button type="button" class="btn btn-outline-primary btn-sm" onclick="openQuickCustomerModal()">
+                <i class="fa-solid fa-user-plus"></i> + Add New Customer
+            </button>
+            <a href="{{ url_for('customers') }}" class="btn btn-secondary btn-sm">
+                <i class="fa-solid fa-address-book"></i> Customer Directory
             </a>
         </div>
     </div>
@@ -23,14 +26,18 @@
         <div class="pos-control-panel">
             <!-- Customer Card -->
             <div class="card mb-3">
-                <div class="card-header">
-                    <h4><i class="fa-solid fa-user-tag"></i> 1. Select Customer</h4>
+                <div class="card-header flex-between">
+                    <h4><i class="fa-solid fa-user-tag"></i> 1. Customer Selection</h4>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="openQuickCustomerModal()">
+                        <i class="fa-solid fa-plus"></i> New Customer
+                    </button>
                 </div>
                 <div class="card-body">
                     <div class="form-group">
-                        <label for="posCustomerSelect">Choose Customer</label>
+                        <label for="posCustomerSelect">Customer Account</label>
                         <select id="posCustomerSelect" class="form-control">
                             <option value="">-- Choose Existing Customer --</option>
+                            <option value="__NEW__" class="text-primary font-bold">+ Register New Customer...</option>
                             {% for c in customers %}
                                 <option value="{{ c[0] }}" data-name="{{ c[1] }}" data-email="{{ c[2] }}" data-region="{{ c[3] }}">
                                     #{{ c[0] }} - {{ c[1] }} ({{ c[3] }})
@@ -60,21 +67,24 @@
                                         data-name="{{ p[1] }}" 
                                         data-cat="{{ p[2] }}" 
                                         data-price="{{ p[3] }}" 
-                                        data-stock="{{ p[4] }}">
-                                    #{{ p[0] }} - {{ p[1] }} [{{ p[2] }}] — ₹{{ p[3] }} (Stock: {{ p[4] }})
+                                        data-stock="{{ p[4] }}"
+                                        data-unit="{{ p[5] }}"
+                                        data-subcat="{{ p[6] }}">
+                                    #{{ p[0] }} - {{ p[1] }} [{{ p[2] }} | {{ p[6] }}] — ₹{{ p[3] }}/{{ p[5] }} (Stock: {{ p[4] }} {{ p[5] }})
                                 </option>
                             {% endfor %}
                         </select>
                     </div>
 
                     <div id="productStockBadge" class="stock-indicator mb-2 d-none">
-                        <span>Price: <strong>₹<span id="selectedPrice">0</span></strong></span>
-                        <span>Available Stock: <strong><span id="selectedStock">0</span> units</strong></span>
+                        <span>Type: <strong id="selectedSubcatBadge" class="badge badge-info">Packing</strong></span>
+                        <span>Price: <strong>₹<span id="selectedPrice">0</span> / <span id="selectedPriceUnit">pcs</span></strong></span>
+                        <span>Available Stock: <strong><span id="selectedStock">0</span> <span id="selectedStockUnit">pcs</span></strong></span>
                     </div>
 
                     <div class="form-row">
                         <div class="form-group flex-1">
-                            <label for="posQuantity">Quantity</label>
+                            <label for="posQuantity">Quantity (in <span id="qtyUnitLabel">units</span>)</label>
                             <input type="number" id="posQuantity" class="form-control" min="1" value="1">
                         </div>
                         <div class="form-group align-end">
@@ -146,7 +156,44 @@
     </div>
 </div>
 
-<!-- Tax Invoice Modal -->
+<!-- Modal 1: Quick Add Customer Modal -->
+<div id="quickCustomerModal" class="modal-overlay d-none">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h3><i class="fa-solid fa-user-plus text-primary"></i> Register New Customer</h3>
+            <button type="button" class="modal-close" onclick="closeQuickCustomerModal()">&times;</button>
+        </div>
+        <form id="quickCustomerForm">
+            <div class="modal-body">
+                <div class="form-group mb-3">
+                    <label for="qc_id">Customer ID (Auto-Generated if blank)</label>
+                    <input type="number" id="qc_id" class="form-control" placeholder="Leave blank to auto-generate">
+                    <small class="form-hint">System will automatically assign next available ID.</small>
+                </div>
+                <div class="form-group mb-3">
+                    <label for="qc_name">Customer Full Name *</label>
+                    <input type="text" id="qc_name" class="form-control" required placeholder="e.g. Rahul Sharma">
+                </div>
+                <div class="form-group mb-3">
+                    <label for="qc_email">Email Address</label>
+                    <input type="email" id="qc_email" class="form-control" placeholder="e.g. rahul@example.com">
+                </div>
+                <div class="form-group">
+                    <label for="qc_region">Region / City *</label>
+                    <input type="text" id="qc_region" class="form-control" required placeholder="e.g. Mumbai, North, South, Delhi">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeQuickCustomerModal()">Cancel</button>
+                <button type="submit" id="saveQuickCustBtn" class="btn btn-primary">
+                    <i class="fa-solid fa-check"></i> Save & Select Customer
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal 2: Tax Invoice Modal -->
 <div id="invoiceModal" class="modal-overlay d-none">
     <div class="modal-card invoice-modal">
         <div class="modal-header">
@@ -244,16 +291,105 @@
     const prodSelect = document.getElementById("posProductSelect");
     const stockBadge = document.getElementById("productStockBadge");
     const selectedPriceSpan = document.getElementById("selectedPrice");
+    const selectedPriceUnitSpan = document.getElementById("selectedPriceUnit");
     const selectedStockSpan = document.getElementById("selectedStock");
+    const selectedStockUnitSpan = document.getElementById("selectedStockUnit");
+    const qtyUnitLabel = document.getElementById("qtyUnitLabel");
     const qtyInput = document.getElementById("posQuantity");
     const addItemBtn = document.getElementById("addItemBtn");
     const checkoutBtn = document.getElementById("checkoutBtn");
     const clearCartBtn = document.getElementById("clearCartBtn");
 
+    // Quick Add Customer Modal controls
+    window.openQuickCustomerModal = function(prefillId = null) {
+        if (prefillId) {
+            document.getElementById("qc_id").value = prefillId;
+        } else {
+            document.getElementById("qc_id").value = "";
+        }
+        document.getElementById("qc_name").value = "";
+        document.getElementById("qc_email").value = "";
+        document.getElementById("qc_region").value = "";
+        document.getElementById("quickCustomerModal").classList.remove("d-none");
+        document.getElementById("qc_name").focus();
+    };
+
+    window.closeQuickCustomerModal = function() {
+        document.getElementById("quickCustomerModal").classList.add("d-none");
+    };
+
+    // Quick customer form submit
+    document.getElementById("quickCustomerForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const cid = document.getElementById("qc_id").value.trim();
+        const name = document.getElementById("qc_name").value.trim();
+        const email = document.getElementById("qc_email").value.trim();
+        const region = document.getElementById("qc_region").value.trim();
+
+        if (!name || !region) {
+            alert("Name and Region are required.");
+            return;
+        }
+
+        const saveBtn = document.getElementById("saveQuickCustBtn");
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Saving...`;
+
+        try {
+            const res = await fetch("/api/customers/quick-add", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    customer_id: cid ? parseInt(cid) : null,
+                    c_name: name,
+                    email: email,
+                    region: region
+                })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                const c = data.customer;
+                // Add option to select
+                const newOpt = document.createElement("option");
+                newOpt.value = c.id;
+                newOpt.dataset.name = c.name;
+                newOpt.dataset.email = c.email;
+                newOpt.dataset.region = c.region;
+                newOpt.text = `#${c.id} - ${c.name} (${c.region})`;
+
+                custSelect.appendChild(newOpt);
+                custSelect.value = c.id;
+
+                // Show details pill
+                document.getElementById("custName").innerText = c.name;
+                document.getElementById("custRegion").innerText = c.region;
+                document.getElementById("custEmail").innerText = c.email;
+                custDetailsBox.classList.remove("d-none");
+
+                closeQuickCustomerModal();
+                updateCheckoutButton();
+            } else {
+                alert("Error: " + (data.message || "Failed to add customer."));
+            }
+        } catch (err) {
+            alert("Connection error: " + err);
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = `<i class="fa-solid fa-check"></i> Save & Select Customer`;
+        }
+    });
+
     // Customer change
     custSelect.addEventListener("change", () => {
+        if (custSelect.value === "__NEW__") {
+            custSelect.value = "";
+            openQuickCustomerModal();
+            return;
+        }
+
         const opt = custSelect.options[custSelect.selectedIndex];
-        if (opt.value) {
+        if (opt && opt.value) {
             document.getElementById("custName").innerText = opt.dataset.name;
             document.getElementById("custRegion").innerText = opt.dataset.region;
             document.getElementById("custEmail").innerText = opt.dataset.email;
@@ -270,11 +406,22 @@
         if (opt.value) {
             selectedPriceSpan.innerText = opt.dataset.price;
             selectedStockSpan.innerText = opt.dataset.stock;
+            const unit = opt.dataset.unit || "pcs";
+            const subcat = opt.dataset.subcat || "Packing";
+            const subcatBadge = document.getElementById("selectedSubcatBadge");
+            if (subcatBadge) {
+                subcatBadge.innerText = subcat;
+                subcatBadge.className = subcat === "Open" ? "badge badge-warning" : "badge badge-info";
+            }
+            if (selectedPriceUnitSpan) selectedPriceUnitSpan.innerText = unit;
+            if (selectedStockUnitSpan) selectedStockUnitSpan.innerText = unit;
+            if (qtyUnitLabel) qtyUnitLabel.innerText = `${unit} [${subcat}]`;
             stockBadge.classList.remove("d-none");
             qtyInput.max = opt.dataset.stock;
             qtyInput.value = 1;
         } else {
             stockBadge.classList.add("d-none");
+            if (qtyUnitLabel) qtyUnitLabel.innerText = "units";
         }
     });
 
@@ -288,7 +435,9 @@
         const pid = parseInt(opt.value);
         const name = opt.dataset.name;
         const category = opt.dataset.cat;
+        const subcat = opt.dataset.subcat || "Packing";
         const price = parseFloat(opt.dataset.price);
+        const unit = opt.dataset.unit || "pcs";
         const availableStock = parseInt(opt.dataset.stock);
         const qty = parseInt(qtyInput.value);
 
@@ -301,7 +450,7 @@
         const currentQtyInCart = existing ? existing.quantity : 0;
 
         if (currentQtyInCart + qty > availableStock) {
-            alert(`Cannot add ${qty} more items. Stock available: ${availableStock} (Already in cart: ${currentQtyInCart})`);
+            alert(`Cannot add ${qty} ${unit} more. Stock available: ${availableStock} ${unit} (Already in cart: ${currentQtyInCart} ${unit})`);
             return;
         }
 
@@ -314,7 +463,9 @@
                 product_id: pid,
                 name: name,
                 category: category,
+                subcategory: subcat,
                 price: price,
+                unit: unit,
                 quantity: qty,
                 gst_rate: gstRate
             });
@@ -355,12 +506,18 @@
             totalSubtotal += itemSubtotal;
             totalGst += itemGst;
 
+            const isopen = item.subcategory === "Open";
+            const subcatBadgeHtml = `<span class="badge ${isopen ? 'badge-warning' : 'badge-info'}" style="font-size: 10px; margin-left: 4px;">${item.subcategory || 'Packing'}</span>`;
+
             const tr = document.createElement("tr");
             tr.innerHTML = `
-                <td><strong>${item.name}</strong><br><small class="text-muted">${item.category}</small></td>
-                <td>₹${item.price}</td>
+                <td><strong>${item.name}</strong> ${subcatBadgeHtml}<br><small class="text-muted">${item.category}</small></td>
+                <td>₹${item.price} / ${item.unit || 'pcs'}</td>
                 <td>
-                    <input type="number" class="qty-pill" min="1" value="${item.quantity}" onchange="updateItemQty(${index}, this.value)">
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <input type="number" class="qty-pill" min="1" value="${item.quantity}" onchange="updateItemQty(${index}, this.value)" style="width: 60px;">
+                        <small class="text-muted font-bold">${item.unit || 'pcs'}</small>
+                    </div>
                 </td>
                 <td>${(item.gst_rate * 100).toFixed(0)}%</td>
                 <td><strong>₹${itemTotal.toFixed(2)}</strong></td>
@@ -404,7 +561,7 @@
     });
 
     function updateCheckoutButton() {
-        const hasCustomer = !!custSelect.value;
+        const hasCustomer = !!custSelect.value && custSelect.value !== "__NEW__";
         const hasItems = cart.length > 0;
         checkoutBtn.disabled = !(hasCustomer && hasItems);
     }
@@ -434,6 +591,9 @@
                 showInvoiceModal(data.invoice);
                 cart = [];
                 renderCart();
+            } else if (data.customer_not_found) {
+                alert(data.message || "Customer does not exist. Opening registration modal.");
+                openQuickCustomerModal(parseInt(custSelect.value));
             } else {
                 alert("Checkout error: " + (data.message || "Failed to process sale"));
             }
@@ -457,12 +617,16 @@
 
         inv.items.forEach((item, idx) => {
             const row = document.createElement("tr");
+            const unit = item.unit || "pcs";
+            const subcat = item.subcategory || "Packing";
+            const qtyDisplay = item.quantity_display || `${item.quantity} ${unit}`;
+            const subcatBadgeHtml = `<span class="badge ${subcat === 'Open' ? 'badge-warning' : 'badge-info'}" style="font-size: 10px; margin-left: 4px;">${subcat}</span>`;
             row.innerHTML = `
                 <td>${idx + 1}</td>
-                <td><strong>${item.name}</strong></td>
+                <td><strong>${item.name}</strong> ${subcatBadgeHtml}</td>
                 <td>${item.category}</td>
-                <td>₹${item.price}</td>
-                <td>${item.quantity}</td>
+                <td>₹${item.price} / ${unit}</td>
+                <td>${qtyDisplay}</td>
                 <td>₹${item.subtotal}</td>
                 <td>₹${item.gst_amount} (${item.gst_rate}%)</td>
                 <td><strong>₹${item.final_amount}</strong></td>
@@ -482,4 +646,3 @@
     };
 </script>
 {% endblock %}
-

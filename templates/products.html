@@ -41,8 +41,15 @@
                         {% endfor %}
                     </select>
                 </div>
+                <div class="filter-select-wrap">
+                    <select name="subcategory" class="form-control" onchange="this.form.submit()">
+                        <option value="">All Types (Packing & Open)</option>
+                        <option value="Packing" {% if selected_subcategory == 'Packing' %}selected{% endif %}>📦 Packing Only</option>
+                        <option value="Open" {% if selected_subcategory == 'Open' %}selected{% endif %}>⚖️ Open (Loose) Only</option>
+                    </select>
+                </div>
                 <button type="submit" class="btn btn-secondary">Filter</button>
-                {% if search or selected_category %}
+                {% if search or selected_category or selected_subcategory %}
                     <a href="{{ url_for('products') }}" class="btn btn-outline-danger">Reset</a>
                 {% endif %}
             </form>
@@ -62,6 +69,7 @@
                             <th>ID</th>
                             <th>Product Name</th>
                             <th>Category</th>
+                            <th>Subcategory</th>
                             <th>Selling Price</th>
                             <th>Cost Price</th>
                             <th>Stock Quantity</th>
@@ -78,11 +86,22 @@
                                     <td><span class="code-pill">#{{ p[0] }}</span></td>
                                     <td><strong>{{ p[1] }}</strong></td>
                                     <td><span class="category-pill">{{ p[2] }}</span></td>
-                                    <td><strong>₹{{ p[3] }}</strong></td>
+                                    <td>
+                                        {% if p[7] == 'Open' %}
+                                            <span class="badge badge-warning" title="Loose goods (Liters for liquids, kg for cereals)">
+                                                <i class="fa-solid fa-scale-unbalanced-flip"></i> Open
+                                            </span>
+                                        {% else %}
+                                            <span class="badge badge-info" title="Pre-packaged goods sold in pieces">
+                                                <i class="fa-solid fa-box"></i> Packing
+                                            </span>
+                                        {% endif %}
+                                    </td>
+                                    <td><strong>₹{{ p[3] }}</strong> <small class="text-muted">/ {{ p[6] }}</small></td>
                                     <td class="text-muted">₹{{ p[5] }}</td>
                                     <td>
                                         <span class="stock-qty-val {% if p[4] < 5 %}text-danger font-bold{% endif %}">
-                                            {{ p[4] }}
+                                            {{ p[4] }} {{ p[6] }}
                                         </span>
                                     </td>
                                     <td>
@@ -98,7 +117,7 @@
                                             <button 
                                                 type="button" 
                                                 class="btn btn-sm btn-outline-primary" 
-                                                onclick="openPriceModal('{{ p[0] }}', '{{ p[1] }}', '{{ p[3] }}')"
+                                                onclick="openPriceModal('{{ p[0] }}', '{{ p[1] }}', '{{ p[3] }}', '{{ p[6] }}', '{{ p[7] }}')"
                                                 title="Adjust Price"
                                             >
                                                 <i class="fa-solid fa-tag"></i> Price
@@ -106,7 +125,7 @@
                                             <button 
                                                 type="button" 
                                                 class="btn btn-sm btn-outline-success" 
-                                                onclick="openRestockModal('{{ p[0] }}', '{{ p[1] }}', '{{ p[4] }}')"
+                                                onclick="openRestockModal('{{ p[0] }}', '{{ p[1] }}', '{{ p[4] }}', '{{ p[6] }}', '{{ p[7] }}')"
                                                 title="Replenish Stock"
                                             >
                                                 <i class="fa-solid fa-dolly"></i> Restock
@@ -118,7 +137,7 @@
                             {% endfor %}
                         {% else %}
                             <tr>
-                                <td colspan="8" class="text-center py-5 text-muted">
+                                <td colspan="9" class="text-center py-5 text-muted">
                                     <i class="fa-solid fa-box-open empty-icon"></i>
                                     <p>No products found matching your search criteria.</p>
                                 </td>
@@ -148,14 +167,37 @@
                     <label for="new_pname">Product Name</label>
                     <input type="text" id="new_pname" name="p_name" class="form-control" required placeholder="e.g. Basmati Rice 1kg">
                 </div>
-                <div class="form-group mb-3">
-                    <label for="new_pcat">Category</label>
-                    <input type="text" id="new_pcat" name="category" class="form-control" list="catList" required placeholder="e.g. Grocery, Electronics, Fruits">
-                    <datalist id="catList">
-                        {% for cat in categories %}
-                            <option value="{{ cat }}"></option>
-                        {% endfor %}
-                    </datalist>
+                <div class="form-row mb-3">
+                    <div class="form-group flex-1">
+                        <label for="new_pcat">Category</label>
+                        <input type="text" id="new_pcat" name="category" class="form-control" list="catList" required placeholder="e.g. Grocery, Electronics, Fruits">
+                        <datalist id="catList">
+                            {% for cat in categories %}
+                                <option value="{{ cat }}"></option>
+                            {% endfor %}
+                        </datalist>
+                    </div>
+                    <div class="form-group flex-1">
+                        <label for="new_subcat">Subcategory</label>
+                        <select id="new_subcat" name="subcategory" class="form-control" required onchange="onSubcatChange()">
+                            <option value="Packing" selected>Packing (Packaged / Sealed / Unit items)</option>
+                            <option value="Open">Open (Loose items: cereals/produce in kg, liquids in L)</option>
+                        </select>
+                        <small class="form-hint" id="subcatHint">Liquid & cereal weight rules apply to <strong>Open</strong> goods.</small>
+                    </div>
+                    <div class="form-group flex-1">
+                        <label for="new_unit">Unit of Measure</label>
+                        <select id="new_unit" name="unit" class="form-control">
+                            <option value="">Auto-Detect (based on subcategory)</option>
+                            <option value="pcs" selected>pcs (Pieces / Units - Packing)</option>
+                            <option value="kg">kg (Kilograms - Open cereals/produce)</option>
+                            <option value="L">L (Liters - Open liquids/oils)</option>
+                            <option value="g">g (Grams)</option>
+                            <option value="ml">ml (Milliliters)</option>
+                            <option value="pack">pack (Packaged items)</option>
+                        </select>
+                        <small class="form-hint" id="unitHint">Packing items default to pcs.</small>
+                    </div>
                 </div>
                 <div class="form-row mb-3">
                     <div class="form-group flex-1">
@@ -192,7 +234,7 @@
                 <input type="hidden" id="price_pid" name="product_id">
                 <p class="mb-3">Updating selling price for: <strong id="price_pname"></strong> (#<span id="price_pid_display"></span>)</p>
                 <div class="form-group">
-                    <label for="price_new_val">New Selling Price (₹)</label>
+                    <label for="price_new_val">New Selling Price (₹ / <span id="price_unit_display">pcs</span>)</label>
                     <input type="number" id="price_new_val" name="new_price" class="form-control" min="0" required>
                 </div>
             </div>
@@ -215,9 +257,9 @@
             <div class="modal-body">
                 <input type="hidden" id="restock_pid" name="product_id">
                 <p class="mb-2">Product: <strong id="restock_pname"></strong></p>
-                <p class="text-muted mb-3">Current Warehouse Stock: <strong id="restock_curr"></strong> units</p>
+                <p class="text-muted mb-3">Current Warehouse Stock: <strong id="restock_curr"></strong> <span id="restock_unit_display">units</span></p>
                 <div class="form-group">
-                    <label for="restock_added">Quantity to Add</label>
+                    <label for="restock_added">Quantity to Add (in <span id="restock_added_unit_display">units</span>)</label>
                     <input type="number" id="restock_added" name="added_stock" class="form-control" min="1" required placeholder="e.g. 25">
                 </div>
             </div>
@@ -238,23 +280,74 @@
 
     function openAddProductModal() {
         document.getElementById("addProductModal").classList.remove("d-none");
+        onSubcatChange();
     }
 
-    function openPriceModal(pid, name, currPrice) {
+    function openPriceModal(pid, name, currPrice, unit = "pcs", subcat = "Packing") {
         document.getElementById("price_pid").value = pid;
         document.getElementById("price_pid_display").innerText = pid;
-        document.getElementById("price_pname").innerText = name;
+        document.getElementById("price_pname").innerText = `${name} [${subcat}]`;
         document.getElementById("price_new_val").value = currPrice;
+        const uSpan = document.getElementById("price_unit_display");
+        if (uSpan) uSpan.innerText = unit || "pcs";
         document.getElementById("priceModal").classList.remove("d-none");
     }
 
-    function openRestockModal(pid, name, currStock) {
+    function openRestockModal(pid, name, currStock, unit = "pcs", subcat = "Packing") {
         document.getElementById("restock_pid").value = pid;
-        document.getElementById("restock_pname").innerText = name;
+        document.getElementById("restock_pname").innerText = `${name} [${subcat}]`;
         document.getElementById("restock_curr").innerText = currStock;
+        const uDisplay = document.getElementById("restock_unit_display");
+        const uAddedDisplay = document.getElementById("restock_added_unit_display");
+        if (uDisplay) uDisplay.innerText = unit || "units";
+        if (uAddedDisplay) uAddedDisplay.innerText = unit || "units";
         document.getElementById("restock_added").value = "";
         document.getElementById("restockModal").classList.remove("d-none");
     }
+
+    const newCatInput = document.getElementById("new_pcat");
+    const newPnameInput = document.getElementById("new_pname");
+    const newSubcatSelect = document.getElementById("new_subcat");
+    const newUnitSelect = document.getElementById("new_unit");
+    const unitHint = document.getElementById("unitHint");
+
+    function onSubcatChange() {
+        const subcat = newSubcatSelect ? newSubcatSelect.value : "Packing";
+        if (subcat === "Packing") {
+            newUnitSelect.value = "pcs";
+            if (unitHint) unitHint.innerHTML = "Packing items default to <strong>pcs</strong>.";
+        } else {
+            suggestOpenUnit();
+            if (unitHint) unitHint.innerHTML = "Open goods: <strong>L</strong> for liquids, <strong>kg</strong> for cereals/produce.";
+        }
+    }
+
+    function suggestOpenUnit() {
+        const cat = (newCatInput ? newCatInput.value : "").toLowerCase();
+        const name = (newPnameInput ? newPnameInput.value : "").toLowerCase();
+        const combined = cat + " " + name;
+
+        const liquidWords = ["milk", "oil", "juice", "beverage", "drink", "water", "soda", "shake", "liquid", "cleaner", "shampoo"];
+        for (const w of liquidWords) {
+            if (combined.includes(w)) {
+                newUnitSelect.value = "L";
+                return;
+            }
+        }
+        newUnitSelect.value = "kg";
+    }
+
+    function suggestUnit() {
+        const subcat = newSubcatSelect ? newSubcatSelect.value : "Packing";
+        if (subcat === "Open") {
+            suggestOpenUnit();
+        } else {
+            newUnitSelect.value = "pcs";
+        }
+    }
+
+    if (newCatInput) newCatInput.addEventListener("input", suggestUnit);
+    if (newPnameInput) newPnameInput.addEventListener("input", suggestUnit);
 </script>
 {% endblock %}
 

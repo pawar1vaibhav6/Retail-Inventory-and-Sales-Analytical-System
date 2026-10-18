@@ -13,9 +13,11 @@ CREATE TABLE IF NOT EXISTS Products (
     product_id INT PRIMARY KEY,
     p_name VARCHAR(50),
     category VARCHAR(50),
+    subcategory VARCHAR(50) DEFAULT 'Packing',
     price INT,
     stock_quantity INT,
-    cost INT
+    cost INT,
+    unit VARCHAR(10) DEFAULT 'pcs'
 );
 
 CREATE TABLE IF NOT EXISTS Customers (

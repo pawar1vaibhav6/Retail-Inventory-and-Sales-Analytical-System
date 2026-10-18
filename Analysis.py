@@ -7,7 +7,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 def low_stock():
     query = """
-    SELECT product_id, p_name, category, stock_quantity
+    SELECT product_id, p_name, category, COALESCE(subcategory, 'Packing') AS subcategory, CONCAT(stock_quantity, ' ', COALESCE(unit, 'pcs')) AS stock
     FROM Products
     WHERE stock_quantity < 5
     """

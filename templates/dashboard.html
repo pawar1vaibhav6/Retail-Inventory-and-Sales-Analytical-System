@@ -179,7 +179,7 @@
                                     <tr>
                                         <td><span class="code-pill">#{{ sale[0] }}</span></td>
                                         <td><strong>{{ sale[1] or 'N/A' }}</strong></td>
-                                        <td>{{ sale[2] }}</td>
+                                        <td>{{ sale[2] }} {{ sale[6] or 'pcs' }}</td>
                                         <td class="text-success font-bold">₹{{ "{:,.2f}".format(sale[3]) }}</td>
                                         <td class="text-muted">{{ sale[5].strftime('%d-%b %H:%M') if sale[5] else 'Recently' }}</td>
                                     </tr>
@@ -211,9 +211,16 @@
                             <tbody>
                                 {% for item in stats.low_stock_items %}
                                     <tr>
-                                        <td><strong>{{ item[1] }}</strong></td>
+                                        <td>
+                                            <strong>{{ item[1] }}</strong>
+                                            {% if item[6] == 'Open' %}
+                                                <span class="badge badge-warning" style="font-size: 10px; margin-left: 4px;">Open</span>
+                                            {% else %}
+                                                <span class="badge badge-info" style="font-size: 10px; margin-left: 4px;">Packing</span>
+                                            {% endif %}
+                                        </td>
                                         <td>{{ item[2] }}</td>
-                                        <td class="text-danger font-bold">{{ item[4] }}</td>
+                                        <td class="text-danger font-bold">{{ item[4] }} {{ item[5] or 'pcs' }}</td>
                                         {% if user.role == 'admin' %}
                                         <td>
                                             <a href="{{ url_for('products') }}" class="btn btn-sm btn-outline-success">Restock</a>

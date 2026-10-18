@@ -9,6 +9,85 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "root")
 DB_NAME = os.getenv("DB_NAME", "sql_class")
 DB_PORT = int(os.getenv("DB_PORT", "3306"))
 
+# Unit of measurement keywords
+LIQUID_KEYWORDS = [
+    'milk', 'oil', 'oil products', 'juice', 'beverage', 'beverages', 'drink', 'drinks',
+    'water', 'liquid', 'tea', 'coffee', 'syrup', 'squash', 'crush', 'shampoo', 'lotion',
+    'cleaner', 'whitener', 'antiseptic', 'refill', 'sauce', 'fuel', 'petrol', 'diesel'
+]
+
+WEIGHT_KEYWORDS = [
+    'cereal', 'cereals', 'grain', 'grains', 'pulse', 'pulses', 'grocery', 'groceries',
+    'rice', 'wheat', 'flour', 'atta', 'dal', 'sugar', 'salt', 'vegetable', 'vegetables',
+    'fruit', 'fruits', 'dry fruits', 'dates', 'cashew', 'almond', 'walnut', 'raisins',
+    'spices', 'masala', 'onion', 'potato', 'tomato', 'apple', 'banana', 'oats', 'flakes', 'muesli'
+]
+
+
+def normalize_subcategory(subcat):
+    """Normalize subcategory into standard 'Packing' or 'Open'."""
+    if not subcat:
+        return 'Packing'
+    s = str(subcat).strip().lower()
+    if s in ['open', 'loose', 'open product', 'open products']:
+        return 'Open'
+    if s in ['packing', 'panking', 'packed', 'package', 'packaging', 'pack']:
+        return 'Packing'
+    return str(subcat).strip().capitalize()
+
+
+def get_product_unit(category, p_name="", explicit_unit=None, subcategory="Packing"):
+    """
+    Determines the unit of measurement based on subcategory:
+    - If explicit_unit is supplied and valid (e.g. g, ml, pack, etc.), return that.
+    - If subcategory is 'Open' (Loose goods):
+        - 'L' for liquids (milk, oil, juice, drinks, beverages, etc.)
+        - 'kg' for cereals, grains, pulses, fruits, vegetables, sugar, spices
+        - Fallback for open products is 'kg'
+    - If subcategory is 'Packing' (Pre-packaged items):
+        - Sold as discrete units -> 'pcs'
+    """
+    # 1. Explicit override if provided
+    if explicit_unit and str(explicit_unit).strip() and str(explicit_unit).strip().lower() not in ['none', '', 'auto']:
+        u = str(explicit_unit).strip().lower()
+        if u in ['l', 'ltr', 'liter', 'liters', 'litre', 'litres']:
+            return 'L'
+        if u in ['kg', 'kgs', 'kilo', 'kilogram', 'kilograms']:
+            return 'kg'
+        if u in ['g', 'gm', 'gram', 'grams']:
+            return 'g'
+        if u in ['ml', 'milliliter']:
+            return 'ml'
+        if u in ['pcs', 'pc', 'piece', 'pieces', 'unit', 'units']:
+            return 'pcs'
+        if u in ['pack', 'packet', 'packets']:
+            return 'pack'
+        return str(explicit_unit).strip()
+
+    # 2. Check subcategory
+    subcat_norm = normalize_subcategory(subcategory)
+    if subcat_norm == 'Open':
+        cat_lower = (category or "").strip().lower()
+        name_lower = (p_name or "").strip().lower()
+
+        # Check liquid indicators
+        for kw in LIQUID_KEYWORDS:
+            if kw in cat_lower or kw in name_lower:
+                return 'L'
+        if any(x in name_lower for x in ['litre', 'liter', 'ltr', '1l', '2l', '500ml', 'liquid']):
+            return 'L'
+
+        # Check weight / cereal / grain / produce indicators
+        for kw in WEIGHT_KEYWORDS:
+            if kw in cat_lower or kw in name_lower:
+                return 'kg'
+
+        # Default for open loose goods is kg
+        return 'kg'
+
+    # 3. For 'Packing' items, goods are packaged in pieces/units
+    return 'pcs'
+
 
 def init_db():
     """Ensure the database and required tables exist in MySQL."""
@@ -41,11 +120,29 @@ def init_db():
                 product_id INT PRIMARY KEY,
                 p_name VARCHAR(50),
                 category VARCHAR(50),
+                subcategory VARCHAR(50) DEFAULT 'Packing',
                 price INT,
                 stock_quantity INT,
-                cost INT
+                cost INT,
+                unit VARCHAR(10) DEFAULT 'pcs'
             )
             """)
+
+            # Ensure unit column exists for existing tables
+            cur.execute("""
+                SELECT COUNT(*) FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'Products' AND COLUMN_NAME = 'unit'
+            """, (DB_NAME,))
+            if cur.fetchone()[0] == 0:
+                cur.execute("ALTER TABLE Products ADD COLUMN unit VARCHAR(10) DEFAULT 'pcs'")
+
+            # Ensure subcategory column exists for existing tables
+            cur.execute("""
+                SELECT COUNT(*) FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'Products' AND COLUMN_NAME = 'subcategory'
+            """, (DB_NAME,))
+            if cur.fetchone()[0] == 0:
+                cur.execute("ALTER TABLE Products ADD COLUMN subcategory VARCHAR(50) DEFAULT 'Packing'")
 
             # Customers table
             cur.execute("""

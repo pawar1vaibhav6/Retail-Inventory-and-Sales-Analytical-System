@@ -175,7 +175,7 @@
                                 {% for p in data.product_sales %}
                                     <tr>
                                         <td><strong>{{ p[0] }}</strong></td>
-                                        <td>{{ p[1] }}</td>
+                                        <td>{{ p[1] }} {{ p[4] or 'pcs' }}</td>
                                         <td>₹{{ "{:,.2f}".format(p[2]) }}</td>
                                         <td class="text-success font-bold">₹{{ "{:,.2f}".format(p[3]) }}</td>
                                     </tr>
@@ -209,10 +209,17 @@
                             {% if data.low_stock %}
                                 {% for ls in data.low_stock %}
                                     <tr>
-                                        <td><strong>{{ ls[1] }}</strong></td>
+                                        <td>
+                                            <strong>{{ ls[1] }}</strong>
+                                            {% if ls[6] == 'Open' %}
+                                                <span class="badge badge-warning" style="font-size: 10px; margin-left: 4px;">Open</span>
+                                            {% else %}
+                                                <span class="badge badge-info" style="font-size: 10px; margin-left: 4px;">Packing</span>
+                                            {% endif %}
+                                        </td>
                                         <td>{{ ls[2] }}</td>
                                         <td>₹{{ ls[3] }}</td>
-                                        <td class="text-danger font-bold">{{ ls[4] }}</td>
+                                        <td class="text-danger font-bold">{{ ls[4] }} {{ ls[5] or 'pcs' }}</td>
                                     </tr>
                                 {% endfor %}
                             {% else %}

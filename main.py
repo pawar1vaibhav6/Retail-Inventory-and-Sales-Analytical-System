@@ -49,9 +49,13 @@ def main():
             if options==1:
 
                 try:
-                    customer_id=int(input("Customer_id:"))
+                    cid_input = int(input("Customer_id:"))
                 except ValueError:
                     print("\033[31mInvalid input. Please enter a valid CustomerId.\033[0m")
+                    continue
+
+                customer_id = c.get_or_create_customer(cid_input)
+                if not customer_id:
                     continue
 
                 total_amount=0
@@ -60,7 +64,8 @@ def main():
                     total_amount,bill,s_id,s_date=s.sale(customer_id,total_amount,bill_items)
                     if input("Add another item? (q to quit): ").lower() == "q":
                         break
-                s.bill_format(s_id,s_date,customer_id,bill,total_amount)
+                if bill_items and s_id:
+                    s.bill_format(s_id,s_date,customer_id,bill,total_amount)
 
             elif options==2:
                 pi.new_product()

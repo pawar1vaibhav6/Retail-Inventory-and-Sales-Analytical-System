@@ -1,23 +1,24 @@
 import pandas as pd
-from db import conn, cursor
+from db import conn, cursor, get_product_unit
 
 
 def sale(customer_id, total_amount, bill_items):
     product_id = int(input("Product_id:"))
-    quantity = int(input("Quantity:"))
-    gst_0 = ["Fruits", "Vegetables", "Milk", "Pulses", "Stationery", "Grocery"]
-    gst_5 = ["Package Food", "Oil Products", "Dry Fruits", "Spices", "tea", "coffee", "Sports", "PersonalCare"]
+    gst_0 = ["Fruits", "Vegetables", "Milk", "Pulses", "Stationery", "Grocery", "Groceries"]
+    gst_5 = ["Package Food", "Oil Products", "Dry Fruits", "Spices", "tea", "coffee", "Sports", "PersonalCare", "Personal Care", "Snacks", "Beverages", "Home Care"]
     gst_18 = ["Electronics", "Furniture", "Fashion", "Accessories"]
 
-    q = "SELECT stock_quantity, price, category FROM Products WHERE product_id = %s"
+    q = "SELECT stock_quantity, price, category, p_name, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing') FROM Products WHERE product_id = %s"
     cursor.execute(q, (product_id,))
     row = cursor.fetchone()
     if not row:
         print("Product not found")
         return total_amount, None, None, None
-    stock = row[0]
-    price = row[1]
-    cat = row[2]
+
+    stock, price, cat, p_name, raw_unit, raw_subcat = row
+    unit = get_product_unit(cat, p_name, explicit_unit=raw_unit, subcategory=raw_subcat)
+
+    quantity = int(input(f"Quantity (in {unit}) [{raw_subcat}]:"))
     amount = quantity * price
 
     if cat in gst_0:
@@ -38,7 +39,7 @@ def sale(customer_id, total_amount, bill_items):
         gst = 0
 
     if quantity > stock:
-        print("Not Enough Stock")
+        print(f"Not Enough Stock. Available warehouse stock: {stock} {unit}")
         return total_amount, None, None, None
     else:
         try:
@@ -67,8 +68,9 @@ def sale(customer_id, total_amount, bill_items):
             bill_items.append({
                 "Product Id": product_id,
                 "Product": row[1],
-                "Price": row[2],
-                "Quantity": quantity,
+                "Type": raw_subcat,
+                "Price": f"Rs. {row[2]}/{unit}",
+                "Quantity": f"{quantity} {unit}",
                 "Total": row[3],
                 "CGST": cgst,
                 "SGSt": sgst,
@@ -90,6 +92,6 @@ def bill_format(s_id, s_date, c_id, df, total):
     Bill Date & Time:{}
     Customer Id:{}
     {}\n
-    Total:{}\033[0m""".format(s_id, s_date, c_id, df, total)
+    Total: Rs. {}\033[0m""".format(s_id, s_date, c_id, df, total)
 
     print(m)

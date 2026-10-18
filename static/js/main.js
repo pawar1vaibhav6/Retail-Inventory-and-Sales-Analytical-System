@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initAjaxLogin();
 });
 
+
 /**
  * Toggle password visibility between hidden and plain text
  */
