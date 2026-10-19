@@ -97,7 +97,69 @@
         }
     }
 
+    function getThemeTokens() {
+        const style = getComputedStyle(document.documentElement);
+        const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+
+        const ember1 = style.getPropertyValue("--ember-1").trim() || "#03071e";
+        const ember2 = style.getPropertyValue("--ember-2").trim() || "#370617";
+        const ember3 = style.getPropertyValue("--ember-3").trim() || "#6a040f";
+        const ember4 = style.getPropertyValue("--ember-4").trim() || "#9d0208";
+        const ember5 = style.getPropertyValue("--ember-5").trim() || "#d00000";
+        const ember6 = style.getPropertyValue("--ember-6").trim() || "#dc2f02";
+        const ember7 = style.getPropertyValue("--ember-7").trim() || "#e85d04";
+        const ember8 = style.getPropertyValue("--ember-8").trim() || "#f48c06";
+        const ember9 = style.getPropertyValue("--ember-9").trim() || "#faa307";
+        const ember10 = style.getPropertyValue("--ember-10").trim() || "#ffba08";
+
+        // Light mode category doughnut: balanced distribution of all 10 ember & obsidian steps
+        const lightCategoryPalette = [
+            ember5,
+            ember8,
+            ember3,
+            ember10,
+            ember6,
+            ember2,
+            ember7,
+            ember4,
+            ember9,
+            ember1
+        ];
+
+        // Dark mode category doughnut: luminous radiant steps alternating for maximum slice contrast
+        const darkCategoryPalette = [
+            ember10,
+            ember8,
+            ember6,
+            ember9,
+            ember5,
+            ember7,
+            ember4,
+            "#fca5a5",
+            "#fdba74",
+            ember3
+        ];
+
+        return {
+            isDark,
+            text: style.getPropertyValue("--text").trim() || (isDark ? "#f1f5f9" : ember1),
+            textMuted: style.getPropertyValue("--text-muted").trim() || (isDark ? "#94a3b8" : ember3),
+            border: style.getPropertyValue("--border").trim() || (isDark ? "#232d3d" : "rgba(55, 6, 23, 0.14)"),
+            surface: style.getPropertyValue("--surface").trim() || (isDark ? "#141a23" : "#ffffff"),
+            accent: style.getPropertyValue("--accent").trim() || (isDark ? ember8 : ember5),
+            categoryPalette: isDark ? darkCategoryPalette : lightCategoryPalette,
+            categoryBorder: isDark ? "#141a23" : "#ffffff",
+            revenueColor: isDark ? ember8 : ember6,
+            costColor: isDark ? "#ef4444" : ember3,
+            profitColor: ember10,
+            lineColor: isDark ? ember10 : ember5,
+            lineFill: isDark ? "rgba(255, 186, 8, 0.18)" : "rgba(220, 47, 2, 0.18)",
+            weeklyColor: isDark ? ember8 : ember6
+        };
+    }
+
     function renderMonthlyChart(m) {
+        const tokens = getThemeTokens();
         const ctx = document.getElementById("monthlyChart").getContext("2d");
         if (monthlyChartInstance) monthlyChartInstance.destroy();
 
@@ -109,24 +171,24 @@
                     {
                         label: "Revenue (₹)",
                         data: m.revenue.length ? m.revenue : [0],
-                        backgroundColor: "rgba(79, 70, 229, 0.75)",
-                        borderColor: "#4f46e5",
+                        backgroundColor: tokens.revenueColor,
+                        borderColor: tokens.border,
                         borderWidth: 1.5,
                         borderRadius: 6
                     },
                     {
                         label: "Cost (₹)",
                         data: m.cost.length ? m.cost : [0],
-                        backgroundColor: "rgba(148, 163, 184, 0.7)",
-                        borderColor: "#94a3b8",
+                        backgroundColor: tokens.costColor,
+                        borderColor: tokens.border,
                         borderWidth: 1.5,
                         borderRadius: 6
                     },
                     {
                         label: "Profit (₹)",
                         data: m.profit.length ? m.profit : [0],
-                        backgroundColor: "rgba(16, 185, 129, 0.8)",
-                        borderColor: "#10b981",
+                        backgroundColor: tokens.profitColor,
+                        borderColor: tokens.border,
                         borderWidth: 1.5,
                         borderRadius: 6
                     }
@@ -136,16 +198,18 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: { position: "top" }
+                    legend: { position: "top", labels: { color: tokens.text } }
                 },
                 scales: {
-                    y: { beginAtZero: true }
+                    x: { ticks: { color: tokens.textMuted }, grid: { color: tokens.border } },
+                    y: { beginAtZero: true, ticks: { color: tokens.textMuted }, grid: { color: tokens.border } }
                 }
             }
         });
     }
 
     function renderCategoryChart(c) {
+        const tokens = getThemeTokens();
         const ctx = document.getElementById("categoryChart").getContext("2d");
         if (categoryChartInstance) categoryChartInstance.destroy();
 
@@ -155,25 +219,23 @@
                 labels: c.labels.length ? c.labels : ["No Sales"],
                 datasets: [{
                     data: c.revenue.length ? c.revenue : [1],
-                    backgroundColor: [
-                        "#4f46e5", "#06b6d4", "#10b981", "#f59e0b", 
-                        "#ec4899", "#8b5cf6", "#14b8a6", "#f97316"
-                    ],
+                    backgroundColor: tokens.categoryPalette,
                     borderWidth: 2,
-                    borderColor: "#ffffff"
+                    borderColor: tokens.categoryBorder
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: { position: "right" }
+                    legend: { position: "right", labels: { color: tokens.text } }
                 }
             }
         });
     }
 
     function renderDailyChart(d) {
+        const tokens = getThemeTokens();
         const ctx = document.getElementById("dailyChart").getContext("2d");
         if (dailyChartInstance) dailyChartInstance.destroy();
 
@@ -184,12 +246,12 @@
                 datasets: [{
                     label: "Daily Revenue (₹)",
                     data: d.sales.length ? d.sales : [0],
-                    borderColor: "#0ea5e9",
-                    backgroundColor: "rgba(14, 165, 233, 0.15)",
+                    borderColor: tokens.lineColor,
+                    backgroundColor: tokens.lineFill,
                     fill: true,
                     tension: 0.35,
                     borderWidth: 2.5,
-                    pointBackgroundColor: "#0ea5e9",
+                    pointBackgroundColor: tokens.lineColor,
                     pointRadius: 4
                 }]
             },
@@ -200,13 +262,15 @@
                     legend: { display: false }
                 },
                 scales: {
-                    y: { beginAtZero: true }
+                    x: { ticks: { color: tokens.textMuted }, grid: { color: tokens.border } },
+                    y: { beginAtZero: true, ticks: { color: tokens.textMuted }, grid: { color: tokens.border } }
                 }
             }
         });
     }
 
     function renderWeeklyChart(w) {
+        const tokens = getThemeTokens();
         const ctx = document.getElementById("weeklyChart").getContext("2d");
         if (weeklyChartInstance) weeklyChartInstance.destroy();
 
@@ -217,8 +281,8 @@
                 datasets: [{
                     label: "Weekly Sales (₹)",
                     data: w.sales.length ? w.sales : [0],
-                    backgroundColor: "rgba(245, 158, 11, 0.8)",
-                    borderColor: "#d97706",
+                    backgroundColor: tokens.weeklyColor,
+                    borderColor: tokens.border,
                     borderWidth: 1.5,
                     borderRadius: 6
                 }]
@@ -227,16 +291,17 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
-                    y: { beginAtZero: true }
+                    x: { ticks: { color: tokens.textMuted }, grid: { color: tokens.border } },
+                    y: { beginAtZero: true, ticks: { color: tokens.textMuted }, grid: { color: tokens.border } }
                 }
             }
         });
     }
 
     function updateChartTheme() {
-        const isDark = document.documentElement.getAttribute("data-theme") === "dark";
-        Chart.defaults.color = isDark ? "#94a3b8" : "#64748b";
-        Chart.defaults.borderColor = isDark ? "#1e293b" : "#e2e8f0";
+        const tokens = getThemeTokens();
+        Chart.defaults.color = tokens.textMuted;
+        Chart.defaults.borderColor = tokens.border;
     }
 
     yearSelect.addEventListener("change", () => {
