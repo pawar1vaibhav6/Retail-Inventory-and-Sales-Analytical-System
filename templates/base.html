@@ -14,6 +14,17 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Immediate Theme Initialization (prevents flash of unstyled content) -->
+    <script>
+        (function() {
+            try {
+                const savedTheme = localStorage.getItem('retailsphere_theme');
+                const systemPrefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                const theme = savedTheme ? savedTheme : (systemPrefersDark ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {}
+        })();
+    </script>
 </head>
 <body>
     <!-- Top Navigation Bar -->
@@ -64,6 +75,11 @@
             {% endif %}
 
             <div class="nav-actions">
+                <!-- Dark Mode Toggle Button -->
+                <button id="themeToggleBtn" class="theme-toggle-btn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">
+                    <i class="fa-solid fa-moon"></i>
+                </button>
+
                 {% if session.get('user_id') %}
                     <div class="user-pill">
                         <span class="role-badge role-{{ session.get('role') }}">

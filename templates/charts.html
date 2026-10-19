@@ -233,12 +233,27 @@
         });
     }
 
+    function updateChartTheme() {
+        const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+        Chart.defaults.color = isDark ? "#94a3b8" : "#64748b";
+        Chart.defaults.borderColor = isDark ? "#1e293b" : "#e2e8f0";
+    }
+
     yearSelect.addEventListener("change", () => {
         loadCharts(yearSelect.value);
     });
 
+    // Handle dynamic dark/light mode toggle
+    window.addEventListener("themeChanged", () => {
+        updateChartTheme();
+        if (yearSelect) {
+            loadCharts(yearSelect.value);
+        }
+    });
+
     // Initial load
     document.addEventListener("DOMContentLoaded", () => {
+        updateChartTheme();
         loadCharts(yearSelect.value);
     });
 </script>

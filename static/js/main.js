@@ -3,11 +3,83 @@
    ========================================================================== */
 
 document.addEventListener("DOMContentLoaded", () => {
+    initThemeToggle();
     initPasswordToggle();
     initRegistrationValidation();
     initAjaxLogin();
 });
 
+/**
+ * Dark / Light Mode Theme Toggle System
+ * Features:
+ * - Persistent choice in localStorage
+ * - System OS preference detection (prefers-color-scheme)
+ * - Broadcasts 'themeChanged' CustomEvent for dynamic components (e.g. Chart.js)
+ * - Cross-tab synchronization via storage event
+ * - Smooth icon switching with proper aria-labels
+ */
+function initThemeToggle() {
+    const themeBtn = document.getElementById("themeToggleBtn");
+    const htmlEl = document.documentElement;
+
+    function applyTheme(theme, save = true) {
+        htmlEl.setAttribute("data-theme", theme);
+        if (save) {
+            try {
+                localStorage.setItem("retailsphere_theme", theme);
+            } catch (e) {}
+        }
+        updateToggleIcon(theme);
+        window.dispatchEvent(new CustomEvent("themeChanged", { detail: { theme } }));
+    }
+
+    function updateToggleIcon(theme) {
+        if (!themeBtn) return;
+        const icon = themeBtn.querySelector("i");
+        if (icon) {
+            if (theme === "dark") {
+                icon.className = "fa-solid fa-sun";
+                themeBtn.setAttribute("title", "Switch to light mode");
+                themeBtn.setAttribute("aria-label", "Switch to light mode");
+            } else {
+                icon.className = "fa-solid fa-moon";
+                themeBtn.setAttribute("title", "Switch to dark mode");
+                themeBtn.setAttribute("aria-label", "Switch to dark mode");
+            }
+        }
+    }
+
+    // Determine current active theme
+    const saved = localStorage.getItem("retailsphere_theme");
+    const sysDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const currentTheme = htmlEl.getAttribute("data-theme") || saved || (sysDark ? "dark" : "light");
+
+    applyTheme(currentTheme, false);
+
+    if (themeBtn) {
+        themeBtn.addEventListener("click", () => {
+            const current = htmlEl.getAttribute("data-theme") || "light";
+            const next = current === "dark" ? "light" : "dark";
+            applyTheme(next, true);
+        });
+    }
+
+    // Synchronize across browser tabs
+    window.addEventListener("storage", (e) => {
+        if (e.key === "retailsphere_theme" && e.newValue) {
+            applyTheme(e.newValue, false);
+        }
+    });
+
+    // Listen to OS system preference changes if user hasn't explicitly set one
+    if (window.matchMedia) {
+        window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+            if (!localStorage.getItem("retailsphere_theme")) {
+                applyTheme(e.matches ? "dark" : "light", false);
+            }
+        });
+    }
+}
 
 /**
  * Toggle password visibility between hidden and plain text
