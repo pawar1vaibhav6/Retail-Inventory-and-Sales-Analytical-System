@@ -33,6 +33,7 @@ class GSTClassifier:
       4. GIR Rule: Essential Character rule for mixtures / composite goods
       5. Bundling: Composite supply (principal rate) vs Mixed supply (highest rate)
       6. Processing & Branding status: 0% loose/unbranded vs 5% pre-packed & branded staples
+      7. Discount calculation and GST application on discounted prices
     """
 
     DEFAULT_DATA_PATH = os.path.join(
@@ -391,3 +392,77 @@ def calculate_bundle_tax(
 def get_item_gst_details(item: Dict[str, Any]) -> Dict[str, Any]:
     return classifier.get_item_gst_details(item)
 
+
+# -----------------------------------------------------------------------------
+# Discount & GST Calculation Rule
+# -----------------------------------------------------------------------------
+def validate_discount_value(discount: Any) -> float:
+    """
+    Validates discount input:
+    - Must be a numeric value (int, float, or numeric string).
+    - Cannot be negative.
+    - Cannot exceed 100%.
+    Raises ValueError with a clear message if invalid.
+    """
+    if discount is None or discount == "":
+        return 0.0
+    try:
+        val = float(discount)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid discount '{discount}'. Discount must be a numeric value.")
+
+    if val < 0:
+        raise ValueError(f"Invalid discount {val}%. Discount cannot be negative.")
+    if val > 100:
+        raise ValueError(f"Invalid discount {val}%. Discount cannot exceed 100%.")
+
+    return round(val, 2)
+
+
+def calculate_discount_and_gst(
+    price: Union[float, int],
+    discount: Union[float, int] = 0.0,
+    gst_rate: float = 0.0,
+    qty: Union[float, int] = 1
+) -> Dict[str, Any]:
+    """
+    Core Discount & GST Calculation Rule:
+      Discounted price = price - (price * discount / 100)
+      GST is applied on the discounted price, not the original price:
+        GST amount (per unit) = discounted price * GST rate
+      Line total = (discounted price + GST) * quantity
+
+    Worked Example Check:
+      Price ₹1000, Discount 10%, GST 18%, Qty 2:
+      -> discounted price = ₹900
+      -> GST per unit = ₹162
+      -> Line total = (₹900 + ₹162) * 2 = ₹2,124
+    """
+    price_val = float(price)
+    disc_percent = validate_discount_value(discount)
+    gst_r = float(gst_rate or 0.0)
+    quantity = float(qty)
+
+    discount_amount_unit = round(price_val * (disc_percent / 100.0), 2)
+    discounted_price = round(price_val - discount_amount_unit, 2)
+    gst_per_unit = round(discounted_price * gst_r, 2)
+
+    line_subtotal = round(discounted_price * quantity, 2)
+    original_subtotal = round(price_val * quantity, 2)
+    discount_amount_total = round(discount_amount_unit * quantity, 2)
+    line_gst = round(gst_per_unit * quantity, 2)
+    line_total = round((discounted_price + gst_per_unit) * quantity, 2)
+
+    return {
+        "original_price": price_val,
+        "discount_percent": disc_percent,
+        "discount_amount_unit": discount_amount_unit,
+        "discount_amount_total": discount_amount_total,
+        "discounted_price": discounted_price,
+        "gst_rate": gst_r,
+        "gst_per_unit": gst_per_unit,
+        "line_subtotal": line_subtotal,
+        "original_subtotal": original_subtotal,
+        "line_gst": line_gst,
+        "line_total": line_total
+    }

@@ -1,9 +1,25 @@
 import pandas as pd
 from db import conn, cursor, get_product_unit
 try:
-    from gst_classifier import get_item_gst_details
+    from gst_classifier import get_item_gst_details, calculate_discount_and_gst
 except ImportError:
     get_item_gst_details = None
+    def calculate_discount_and_gst(price, discount=0.0, gst_rate=0.0, qty=1):
+        price_val = float(price)
+        disc = float(discount or 0.0)
+        disc_amt_unit = round(price_val * (disc / 100.0), 2)
+        disc_price = round(price_val - disc_amt_unit, 2)
+        gst_unit = round(disc_price * float(gst_rate), 2)
+        return {
+            "original_price": price_val,
+            "discount_percent": disc,
+            "discount_amount_unit": disc_amt_unit,
+            "discount_amount_total": round(disc_amt_unit * qty, 2),
+            "discounted_price": disc_price,
+            "line_subtotal": round(disc_price * qty, 2),
+            "line_gst": round(gst_unit * qty, 2),
+            "line_total": round((disc_price + gst_unit) * qty, 2)
+        }
 
 
 def sale(customer_id, total_amount, bill_items):
@@ -12,21 +28,22 @@ def sale(customer_id, total_amount, bill_items):
     gst_5 = ["Package Food", "Oil Products", "Dry Fruits", "Spices", "tea", "coffee", "Sports", "PersonalCare", "Personal Care", "Snacks", "Beverages", "Home Care"]
     gst_18 = ["Electronics", "Furniture", "Fashion", "Accessories"]
 
-    # Retrieve product info including HSN and classification fields if available
+    # Retrieve product info including HSN, classification, and discount fields if available
     try:
         q = """SELECT stock_quantity, price, category, p_name, 
                       COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing'),
                       COALESCE(hsn_code, ''), COALESCE(is_packaged, 1), 
-                      COALESCE(is_branded, 1), COALESCE(bundle_type, '') 
+                      COALESCE(is_branded, 1), COALESCE(bundle_type, ''),
+                      COALESCE(discount, 0.0) 
                FROM Products WHERE product_id = %s"""
         cursor.execute(q, (product_id,))
         row = cursor.fetchone()
         if not row:
             print("Product not found")
             return total_amount, None, None, None
-        stock, price, cat, p_name, raw_unit, raw_subcat, hsn_code, is_packaged, is_branded, bundle_type = row
+        stock, price, cat, p_name, raw_unit, raw_subcat, hsn_code, is_packaged, is_branded, bundle_type, discount = row
     except Exception:
-        # Fallback query if HSN columns don't exist yet
+        # Fallback query if columns don't exist yet
         q_legacy = "SELECT stock_quantity, price, category, p_name, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing') FROM Products WHERE product_id = %s"
         cursor.execute(q_legacy, (product_id,))
         row = cursor.fetchone()
@@ -34,12 +51,11 @@ def sale(customer_id, total_amount, bill_items):
             print("Product not found")
             return total_amount, None, None, None
         stock, price, cat, p_name, raw_unit, raw_subcat = row
-        hsn_code, is_packaged, is_branded, bundle_type = "", 1, 1, ""
+        hsn_code, is_packaged, is_branded, bundle_type, discount = "", 1, 1, "", 0.0
 
     unit = get_product_unit(cat, p_name, explicit_unit=raw_unit, subcategory=raw_subcat)
 
     quantity = int(input(f"Quantity (in {unit}) [{raw_subcat}]:"))
-    amount = quantity * price
 
     # GST calculation: prefer HSN / GIR classification engine; fallback to category
     hsn_display = hsn_code if hsn_code else "N/A"
@@ -90,8 +106,14 @@ def sale(customer_id, total_amount, bill_items):
         return total_amount, None, None, None
     else:
         try:
+            # Discount & GST calculation rule:
+            # Discounted price = price - (price * discount / 100)
+            # GST amount = discounted price * GST rate
+            # Line total = (discounted price + GST) * quantity
+            calc = calculate_discount_and_gst(price, discount, gst, quantity)
+
             query = "INSERT INTO Sales (product_id, customer_id, Date, quantity, total_amount, gst_amount) VALUES (%s, %s, NOW(), %s, %s, %s)"
-            cursor.execute(query, (product_id, customer_id, quantity, amount, int(amount * gst)))
+            cursor.execute(query, (product_id, customer_id, quantity, int(calc["line_subtotal"]), int(calc["line_gst"])))
             sale_id = cursor.lastrowid
 
             query1 = "UPDATE Products SET stock_quantity = stock_quantity - %s WHERE product_id = %s"
@@ -112,21 +134,29 @@ def sale(customer_id, total_amount, bill_items):
 
             row = cursor.fetchone()
 
+            disc_str = f"{calc['discount_percent']}% (-Rs. {calc['discount_amount_unit']})" if calc["discount_percent"] > 0 else "0%"
             bill_items.append({
                 "Product Id": product_id,
                 "Product": row[1],
                 "HSN": hsn_display,
                 "Type": raw_subcat,
-                "Price": f"Rs. {row[2]}/{unit}",
+                "Original Price": f"Rs. {price}/{unit}",
+                "Discount": disc_str,
+                "Discounted Price": f"Rs. {calc['discounted_price']}/{unit}",
                 "Quantity": f"{quantity} {unit}",
-                "Total": row[3],
+                "Subtotal": calc["line_subtotal"],
                 "CGST": cgst,
                 "SGST": sgst,
-                "GST_Total": row[3] * gst,
-                "Final Amount": row[3] + row[3] * gst
+                "GST_Total": calc["line_gst"],
+                "Line Total": calc["line_total"],
+                # Legacy keys for backward-compatibility
+                "Price": f"Rs. {price}/{unit}",
+                "Total": calc["line_subtotal"],
+                "Final Amount": calc["line_total"],
+                "_discount_amount_total": calc["discount_amount_total"]
             })
             df = pd.DataFrame(bill_items)
-            total_amount += amount + row[3] * gst
+            total_amount += calc["line_total"]
             return total_amount, df, row[4], row[5]
         except Exception as e:
             conn.rollback()
@@ -135,11 +165,19 @@ def sale(customer_id, total_amount, bill_items):
 
 
 def bill_format(s_id, s_date, c_id, df, total):
+    total_discount = 0.0
+    if isinstance(df, pd.DataFrame) and "_discount_amount_total" in df.columns:
+        total_discount = float(df["_discount_amount_total"].sum())
+
+    # Create display dataframe excluding internal columns
+    display_df = df.drop(columns=["_discount_amount_total"], errors="ignore") if isinstance(df, pd.DataFrame) else df
+
     m = """\033[1;32m                       Tax Invoice  
     Bill No:{}
     Bill Date & Time:{}
     Customer Id:{}
     {}\n
-    Total: Rs. {}\033[0m""".format(s_id, s_date, c_id, df, total)
+    Total Discount: Rs. {:.2f}
+    Grand Total:    Rs. {:.2f}\033[0m""".format(s_id, s_date, c_id, display_df, total_discount, float(total))
 
     print(m)

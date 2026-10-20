@@ -94,17 +94,32 @@ export const productsAPI = {
     });
   },
 
-  updatePrice: async (id, newPrice) => {
+  updatePrice: async (id, newPrice, discount) => {
+    const payload = { new_price: newPrice };
+    if (discount !== undefined && discount !== null && discount !== '') {
+      payload.discount = discount;
+    }
     return request(`/api/products/${id}/price`, {
       method: 'PUT',
-      body: JSON.stringify({ new_price: newPrice })
+      body: JSON.stringify(payload)
     });
   },
 
-  restock: async (id, addedStock) => {
+  updateDiscount: async (id, discount) => {
+    return request(`/api/products/${id}/discount`, {
+      method: 'PUT',
+      body: JSON.stringify({ discount })
+    });
+  },
+
+  restock: async (id, addedStock, discount) => {
+    const payload = { added_stock: addedStock };
+    if (discount !== undefined && discount !== null && discount !== '') {
+      payload.discount = discount;
+    }
     return request(`/api/products/${id}/restock`, {
       method: 'POST',
-      body: JSON.stringify({ added_stock: addedStock })
+      body: JSON.stringify(payload)
     });
   },
 
@@ -193,4 +208,3 @@ export default {
   analytics: analyticsAPI,
   charts: chartsAPI
 };
-

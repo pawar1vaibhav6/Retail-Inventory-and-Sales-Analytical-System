@@ -23,6 +23,8 @@ from db import verify_user, register_user, get_connection, get_product_unit, nor
 from gst_classifier import (
     classifier,
     get_item_gst_details,
+    calculate_discount_and_gst,
+    validate_discount_value,
     InvalidHSNError,
     UnknownHSNError,
     ClassificationError
@@ -299,7 +301,8 @@ def api_get_products():
                        COALESCE(hsn_code, '') AS hsn_code,
                        COALESCE(is_packaged, 1) AS is_packaged,
                        COALESCE(is_branded, 1) AS is_branded,
-                       COALESCE(bundle_type, '') AS bundle_type
+                       COALESCE(bundle_type, '') AS bundle_type,
+                       COALESCE(discount, 0.0) AS discount
                 FROM Products WHERE 1=1
             """
             params = []
@@ -330,7 +333,8 @@ def api_get_products():
                     "hsn": r[8] if len(r) > 8 and r[8] else None,
                     "is_packaged": bool(r[9]) if len(r) > 9 else True,
                     "is_branded": bool(r[10]) if len(r) > 10 else True,
-                    "bundle_type": r[11] if len(r) > 11 and r[11] else None
+                    "bundle_type": r[11] if len(r) > 11 and r[11] else None,
+                    "discount": float(r[12]) if len(r) > 12 and r[12] is not None else 0.0
                 })
     finally:
         conn.close()
@@ -374,14 +378,21 @@ def api_add_product():
                 is_branded = 0 if str(data.get("is_branded", "")).lower() in ("0", "false") else 1
                 bundle_type = data.get("bundle_type") or None
 
+                # Discount attribute (0-100%, default 0.0)
+                disc_input = data.get("discount")
+                try:
+                    discount = validate_discount_value(disc_input) if disc_input is not None and disc_input != "" else 0.0
+                except ValueError as disc_err:
+                    return jsonify({"success": False, "message": str(disc_err)}), 400
+
                 cur.execute("""
                     INSERT INTO Products (
                         product_id, p_name, category, subcategory, price, stock_quantity, cost, unit,
-                        hsn_code, is_packaged, is_branded, bundle_type
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        hsn_code, is_packaged, is_branded, bundle_type, discount
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     pid, p_name, category, subcategory, price, stock, cost, unit,
-                    hsn_code, is_packaged, is_branded, bundle_type
+                    hsn_code, is_packaged, is_branded, bundle_type, discount
                 ))
                 conn.commit()
 
@@ -398,7 +409,8 @@ def api_add_product():
                     "hsn": hsn_code,
                     "is_packaged": bool(is_packaged),
                     "is_branded": bool(is_branded),
-                    "bundle_type": bundle_type
+                    "bundle_type": bundle_type,
+                    "discount": discount
                 }
                 return jsonify({
                     "success": True,
@@ -426,23 +438,62 @@ def api_update_product_price(pid):
 
     try:
         new_price = int(float(new_price))
+        disc_input = data.get("discount")
+        new_discount = validate_discount_value(disc_input) if disc_input is not None and disc_input != "" else None
         conn = get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("UPDATE Products SET price = %s WHERE product_id = %s", (new_price, pid))
+                if new_discount is not None:
+                    cur.execute("UPDATE Products SET price = %s, discount = %s WHERE product_id = %s", (new_price, new_discount, pid))
+                else:
+                    cur.execute("UPDATE Products SET price = %s WHERE product_id = %s", (new_price, pid))
+                conn.commit()
+                if cur.rowcount > 0:
+                    resp = {
+                        "success": True,
+                        "id": pid,
+                        "price": new_price,
+                        "message": f"Updated price for Product #{pid} to ₹{new_price}."
+                    }
+                    if new_discount is not None:
+                        resp["discount"] = new_discount
+                    return jsonify(resp)
+                return jsonify({"success": False, "message": f"Product #{pid} not found."}), 404
+        finally:
+            conn.close()
+    except ValueError as err:
+        return jsonify({"success": False, "message": str(err)}), 400
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Failed to update price: {e}"}), 500
+
+
+@app.route("/api/products/<int:pid>/discount", methods=["PUT", "POST"])
+def api_update_product_discount(pid):
+    data = request.get_json(silent=True) or request.form
+    disc_val = data.get("discount")
+    if disc_val is None or disc_val == "":
+        return jsonify({"success": False, "message": "Discount value is required."}), 400
+    try:
+        discount = validate_discount_value(disc_val)
+        conn = get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE Products SET discount = %s WHERE product_id = %s", (discount, pid))
                 conn.commit()
                 if cur.rowcount > 0:
                     return jsonify({
                         "success": True,
                         "id": pid,
-                        "price": new_price,
-                        "message": f"Updated price for Product #{pid} to ₹{new_price}."
+                        "discount": discount,
+                        "message": f"Updated discount for Product #{pid} to {discount}%."
                     })
                 return jsonify({"success": False, "message": f"Product #{pid} not found."}), 404
         finally:
             conn.close()
+    except ValueError as err:
+        return jsonify({"success": False, "message": str(err)}), 400
     except Exception as e:
-        return jsonify({"success": False, "message": f"Failed to update price: {e}"}), 500
+        return jsonify({"success": False, "message": f"Failed to update discount: {e}"}), 500
 
 
 @app.route("/api/products/<int:pid>/restock", methods=["POST"])
@@ -457,23 +508,35 @@ def api_restock_product(pid):
         if added_stock <= 0:
             return jsonify({"success": False, "message": "Added stock must be greater than zero."}), 400
 
+        # Optional discount update during restock (keeps current if not supplied)
+        disc_input = data.get("discount")
+        new_discount = None
+        if disc_input is not None and disc_input != "":
+            new_discount = validate_discount_value(disc_input)
+
         conn = get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT cost, p_name, category, stock_quantity, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing') FROM Products WHERE product_id = %s",
+                    "SELECT cost, p_name, category, stock_quantity, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing'), COALESCE(discount, 0.0) FROM Products WHERE product_id = %s",
                     (pid,)
                 )
                 row = cur.fetchone()
                 if not row:
                     return jsonify({"success": False, "message": f"Product #{pid} not found."}), 404
 
-                cost, p_name, cat, current_stock, raw_unit, raw_subcat = row
+                cost, p_name, cat, current_stock, raw_unit, raw_subcat, cur_discount = row
                 unit = get_product_unit(cat, p_name, explicit_unit=raw_unit, subcategory=raw_subcat)
                 total_restock_cost = cost * added_stock
                 new_stock = current_stock + added_stock
 
-                cur.execute("UPDATE Products SET stock_quantity = stock_quantity + %s WHERE product_id = %s", (added_stock, pid))
+                if new_discount is not None:
+                    cur.execute("UPDATE Products SET stock_quantity = stock_quantity + %s, discount = %s WHERE product_id = %s", (added_stock, new_discount, pid))
+                    active_discount = new_discount
+                else:
+                    cur.execute("UPDATE Products SET stock_quantity = stock_quantity + %s WHERE product_id = %s", (added_stock, pid))
+                    active_discount = float(cur_discount or 0.0)
+
                 cur.execute(
                     "INSERT INTO stock (product_id, Restock_date, Added_stock, total_cost) VALUES (%s, NOW(), %s, %s)",
                     (pid, added_stock, total_restock_cost)
@@ -485,11 +548,14 @@ def api_restock_product(pid):
                     "id": pid,
                     "added": added_stock,
                     "stock": new_stock,
+                    "discount": active_discount,
                     "totalCost": total_restock_cost,
                     "message": f"Restocked {added_stock} {unit} for '{p_name}'. Replenishment cost: ₹{total_restock_cost}."
                 })
         finally:
             conn.close()
+    except ValueError as err:
+        return jsonify({"success": False, "message": str(err)}), 400
     except Exception as e:
         return jsonify({"success": False, "message": f"Failed to restock product: {e}"}), 500
 
@@ -689,6 +755,8 @@ def api_pos_checkout():
             bill_items = []
             total_bill_amount = 0
             total_gst_amount = 0
+            total_original_subtotal = 0
+            total_discount_amount = 0
             created_sale_ids = []
             bill_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -706,7 +774,8 @@ def api_pos_checkout():
                            COALESCE(hsn_code, '') AS hsn_code,
                            COALESCE(is_packaged, 1) AS is_packaged,
                            COALESCE(is_branded, 1) AS is_branded,
-                           COALESCE(bundle_type, '') AS bundle_type
+                           COALESCE(bundle_type, '') AS bundle_type,
+                           COALESCE(discount, 0.0) AS discount
                     FROM Products WHERE product_id = %s FOR UPDATE
                 """, (pid,))
                 prod = cur.fetchone()
@@ -714,7 +783,7 @@ def api_pos_checkout():
                     conn.rollback()
                     return jsonify({"success": False, "message": f"Product #{pid} not found in catalog."}), 400
 
-                p_name, category, price, stock_qty, raw_unit, raw_subcat, raw_hsn, raw_pkg, raw_brd, raw_bundle = prod
+                p_name, category, price, stock_qty, raw_unit, raw_subcat, raw_hsn, raw_pkg, raw_brd, raw_bundle, discount = prod
                 unit = get_product_unit(category, p_name, explicit_unit=raw_unit, subcategory=raw_subcat)
 
                 if qty > stock_qty:
@@ -754,14 +823,21 @@ def api_pos_checkout():
                     gst_rate, cgst_rate, sgst_rate = get_gst_rate(category)
                     hsn_code = explicit_item_hsn or "9988"
 
-                item_subtotal = price * qty
-                item_gst = int(item_subtotal * gst_rate)
-                item_final = item_subtotal + item_gst
+                # Apply Discount & GST Calculation Rule:
+                # Discounted price = price - (price * discount / 100)
+                # GST amount = discounted price * GST rate
+                # Line total = (discounted price + GST) * quantity
+                item_discount = float(item.get("discount") if item.get("discount") is not None else (discount or 0.0))
+                calc = calculate_discount_and_gst(price, item_discount, gst_rate, qty)
+
+                item_subtotal = calc["line_subtotal"]
+                item_gst = calc["line_gst"]
+                item_final = calc["line_total"]
 
                 # Insert Sale record
                 cur.execute(
                     "INSERT INTO Sales (product_id, customer_id, Date, quantity, total_amount, gst_amount) VALUES (%s, %s, NOW(), %s, %s, %s)",
-                    (pid, customer_id, qty, item_subtotal, item_gst)
+                    (pid, customer_id, qty, int(item_subtotal), int(item_gst))
                 )
                 sale_id = cur.lastrowid
                 created_sale_ids.append(sale_id)
@@ -779,19 +855,28 @@ def api_pos_checkout():
                     "subcategory": raw_subcat,
                     "unit": unit,
                     "price": price,
+                    "original_price": price,
+                    "discount": calc["discount_percent"],
+                    "discount_percent": calc["discount_percent"],
+                    "discount_amount": calc["discount_amount_unit"],
+                    "total_discount": calc["discount_amount_total"],
+                    "discounted_price": calc["discounted_price"],
                     "quantity": qty,
                     "qty": qty,
-                    "subtotal": item_subtotal,
+                    "subtotal": calc["line_subtotal"],
+                    "original_subtotal": calc["original_subtotal"],
                     "gstRate": int(round(gst_rate * 100)),
-                    "gst": item_gst,
-                    "gst_amount": item_gst,
-                    "cgst_amount": round(item_gst / 2.0, 2),
-                    "sgst_amount": round(item_gst / 2.0, 2),
-                    "total": item_final
+                    "gst": calc["line_gst"],
+                    "gst_amount": calc["line_gst"],
+                    "cgst_amount": round(calc["line_gst"] / 2.0, 2),
+                    "sgst_amount": round(calc["line_gst"] / 2.0, 2),
+                    "total": calc["line_total"]
                 })
 
-                total_bill_amount += item_final
-                total_gst_amount += item_gst
+                total_bill_amount += calc["line_total"]
+                total_gst_amount += calc["line_gst"]
+                total_original_subtotal += calc["original_subtotal"]
+                total_discount_amount += calc["discount_amount_total"]
 
             conn.commit()
 
@@ -812,6 +897,9 @@ def api_pos_checkout():
                     "region": customer[3]
                 },
                 "items": bill_items,
+                "originalSubtotal": total_original_subtotal,
+                "totalDiscount": total_discount_amount,
+                "total_discount": total_discount_amount,
                 "subtotal": total_bill_amount - total_gst_amount,
                 "gstTotal": total_gst_amount,
                 "total_gst": total_gst_amount,
@@ -845,7 +933,7 @@ def api_get_orders():
                 SELECT s.sales_id, s.product_id, p.p_name, p.category, p.price, 
                        s.quantity, s.total_amount, s.gst_amount, s.Date,
                        c.customer_id, c.c_name, c.region, COALESCE(p.unit, 'pcs'),
-                       COALESCE(p.hsn_code, '')
+                       COALESCE(p.hsn_code, ''), COALESCE(p.discount, 0.0)
                 FROM Sales s
                 LEFT JOIN Products p ON s.product_id = p.product_id
                 LEFT JOIN Customers c ON s.customer_id = c.customer_id
@@ -855,9 +943,15 @@ def api_get_orders():
             rows = cur.fetchall()
 
             for r in rows:
-                sales_id, pid, p_name, category, price, qty, subtotal, gst, dt, cid, cname, region, unit, hsn = r
+                sales_id, pid, p_name, category, price, qty, subtotal, gst, dt, cid, cname, region, unit, hsn, discount = r
                 iso_date = dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
                 total = (subtotal or 0) + (gst or 0)
+                orig_price = float(price or 0)
+                disc_pct = float(discount or 0.0)
+                disc_amt_unit = round(orig_price * (disc_pct / 100.0), 2)
+                disc_price = round(orig_price - disc_amt_unit, 2)
+                total_disc = round(disc_amt_unit * (qty or 1), 2)
+
                 orders.append({
                     "billNumber": sales_id,
                     "customerId": cid or 1,
@@ -871,7 +965,13 @@ def api_get_orders():
                             "hsn_code": hsn or None,
                             "hsn": hsn or None,
                             "category": category or "General",
-                            "price": price or 0,
+                            "price": orig_price,
+                            "original_price": orig_price,
+                            "discount": disc_pct,
+                            "discount_percent": disc_pct,
+                            "discount_amount": disc_amt_unit,
+                            "total_discount": total_disc,
+                            "discounted_price": disc_price,
                             "qty": qty or 1,
                             "unit": unit or "pcs",
                             "subtotal": subtotal or 0,
@@ -879,6 +979,9 @@ def api_get_orders():
                             "total": total
                         }
                     ],
+                    "originalSubtotal": (subtotal or 0) + total_disc,
+                    "totalDiscount": total_disc,
+                    "total_discount": total_disc,
                     "subtotal": subtotal or 0,
                     "gstTotal": gst or 0,
                     "grandTotal": total

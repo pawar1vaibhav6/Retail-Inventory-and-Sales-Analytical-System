@@ -37,14 +37,14 @@ export default function Products() {
         const created = await addProduct(data);
         setFeedback({ type: 'success', message: `Product "${created.name}" created successfully!` });
       } else if (modalState.mode === 'price' && modalState.product) {
-        await updateProduct(modalState.product.id, { price: data.price });
+        await updateProduct(modalState.product.id, { price: data.price, discount: data.discount });
         setFeedback({
           type: 'success',
-          message: `Updated price for "${modalState.product.name}" to ₹${data.price}/${modalState.product.unit || 'unit'}.`
+          message: `Updated price/discount for "${modalState.product.name}".`
         });
       } else if (modalState.mode === 'restock' && modalState.product) {
         const newStock = Number(modalState.product.stock) + Number(data.addStock);
-        await updateProduct(modalState.product.id, { stock: newStock, addStock: data.addStock });
+        await updateProduct(modalState.product.id, { stock: newStock, addStock: data.addStock, discount: data.discount });
         setFeedback({
           type: 'success',
           message: `Restocked ${data.addStock} ${modalState.product.unit || 'unit'}. New Stock: ${newStock} ${modalState.product.unit || 'unit'}.`
@@ -61,6 +61,78 @@ export default function Products() {
     setSelectedSubcategory('');
   };
 
+  const s = {
+  card: {
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    boxShadow: "0 1px 3px rgba(16,24,40,0.06)",
+    marginBottom: 16,
+  },
+  body: { padding: 16 },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+    gap: 12,
+    alignItems: "center",
+  },
+  searchBox: { position: "relative", gridColumn: "span 2", minWidth: 0 },
+  searchIcon: {
+    position: "absolute",
+    left: 14,
+    top: "50%",
+    transform: "translateY(-50%)",
+    color: "#9ca3af",
+    fontSize: 14,
+    pointerEvents: "none",
+  },
+  clearBtn: {
+    position: "absolute",
+    right: 8,
+    top: "50%",
+    transform: "translateY(-50%)",
+    width: 24,
+    height: 24,
+    border: "none",
+    borderRadius: "50%",
+    background: "#f3f4f6",
+    color: "#6b7280",
+    cursor: "pointer",
+    fontSize: 11,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  control: (isFocused, active) => ({
+    width: "100%",
+    height: 42,
+    boxSizing: "border-box",
+    padding: "0 14px",
+    fontSize: 14,
+    color: "#111827",
+    background: active ? "#eff6ff" : "#fff",
+    border: `1px solid ${isFocused ? "#3b82f6" : active ? "#93c5fd" : "#d1d5db"}`,
+    borderRadius: 8,
+    outline: "none",
+    boxShadow: isFocused ? "0 0 0 3px rgba(59,130,246,0.18)" : "none",
+    transition: "border-color .15s, box-shadow .15s, background .15s",
+    cursor: "pointer",
+  }),
+  reset: (hover) => ({
+    height: 42,
+    padding: "0 18px",
+    fontSize: 14,
+    fontWeight: 500,
+    color: hover ? "#fff" : "#374151",
+    background: hover ? "#ef4444" : "#f3f4f6",
+    border: "1px solid transparent",
+    borderRadius: 8,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    transition: "background .15s, color .15s",
+  }),
+};
+
   return (
     <div className="inventory-container container" style={{ padding: '1.5rem 1rem' }}>
       {/* Header */}
@@ -71,7 +143,7 @@ export default function Products() {
             Inventory &amp; Product Catalog
           </h2>
           <p className="subtitle">
-            Manage products, adjust selling prices, replenish warehouse stock, and monitor low-stock warnings.
+            Manage products, adjust selling prices, set discounts, replenish warehouse stock, and monitor low-stock warnings.
           </p>
         </div>
         <div className="header-actions">
@@ -100,52 +172,52 @@ export default function Products() {
         </div>
       )}
 
-      {/* Search & Filter Bar */}
+      {/* Filter and Search Bar */}
       <div className="card mb-4">
-        <div className="card-body py-3">
-          <div className="search-filter-form" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <div className="filter-input-wrap" style={{ flex: 1, minWidth: 200 }}>
-              <i className="fa-solid fa-magnifying-glass" />
+        <div className="card-body">
+          <div className="filters-grid">
+            <div className="search-box">
+              <i className="fa-solid fa-magnifying-glass search-icon" />
               <input
                 type="text"
                 className="form-control"
-                placeholder="Search by product name or ID..."
+                placeholder="Search products by name or ID..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
 
-            <div className="filter-select-wrap">
+            <div className="filter-group">
               <select
                 className="form-control"
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
               >
                 <option value="">All Categories</option>
-                {categories.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
+                {categories.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
                   </option>
                 ))}
               </select>
             </div>
 
-            <div className="filter-select-wrap">
+            <div className="filter-group">
               <select
                 className="form-control"
                 value={selectedSubcategory}
                 onChange={(e) => setSelectedSubcategory(e.target.value)}
               >
-                <option value="">All Types (Packing &amp; Open)</option>
+                <option value="">All Types (Packaging)</option>
                 <option value="Packing">📦 Packing Only</option>
-                <option value="Open">⚖️ Open (Loose) Only</option>
+                <option value="Open">⚖️ Open / Loose Only</option>
               </select>
             </div>
 
             {(search || selectedCategory || selectedSubcategory) && (
               <button
                 type="button"
-                className="btn btn-outline-danger"
+                className="btn btn-secondary"
                 onClick={handleResetFilters}
               >
                 Reset
@@ -173,6 +245,7 @@ export default function Products() {
                   <th>Category</th>
                   <th>Subcategory</th>
                   <th>Selling Price</th>
+                  <th>Discount</th>
                   <th>Cost Price</th>
                   <th>Stock Quantity</th>
                   <th>Status</th>
@@ -212,6 +285,15 @@ export default function Products() {
                       <td>
                         <strong>₹{p.price}</strong> <small className="text-muted">/ {p.unit}</small>
                       </td>
+                      <td>
+                        {p.discount > 0 ? (
+                          <span className="badge badge-success">
+                            {p.discount}% off
+                          </span>
+                        ) : (
+                          <span className="text-muted">0%</span>
+                        )}
+                      </td>
                       <td className="text-muted">₹{p.cost}</td>
                       <td>
                         <span className={`stock-qty-val ${p.stock < 5 ? 'text-danger font-bold' : ''}`}>
@@ -243,7 +325,7 @@ export default function Products() {
                             <button
                               type="button"
                               className="btn btn-sm btn-outline-success text-black"
-                              style={{ color:"black"}}
+                              style={{ color: "black" }}
                               onClick={() => handleOpenModal('restock', p)}
                               title="Replenish Warehouse Stock"
                             >
@@ -256,7 +338,7 @@ export default function Products() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={user?.role === 'admin' ? 9 : 8} className="text-center py-5 text-muted">
+                    <td colSpan={user?.role === 'admin' ? 10 : 9} className="text-center py-5 text-muted">
                       <i className="fa-solid fa-box-open empty-icon" />
                       <p>No products found matching your search criteria.</p>
                     </td>
@@ -280,4 +362,3 @@ export default function Products() {
     </div>
   );
 }
-

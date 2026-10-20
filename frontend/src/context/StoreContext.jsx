@@ -117,10 +117,12 @@ export function StoreProvider({ children }) {
   const updateProduct = async (id, updated) => {
     try {
       if (updated.price !== undefined) {
-        await productsAPI.updatePrice(id, updated.price);
+        await productsAPI.updatePrice(id, updated.price, updated.discount);
+      } else if (updated.discount !== undefined && updated.addStock === undefined) {
+        await productsAPI.updateDiscount(id, updated.discount);
       }
       if (updated.addStock !== undefined) {
-        await productsAPI.restock(id, updated.addStock);
+        await productsAPI.restock(id, updated.addStock, updated.discount);
       }
       setProducts((prev) =>
         prev.map((item) => (item.id === id ? { ...item, ...updated } : item))

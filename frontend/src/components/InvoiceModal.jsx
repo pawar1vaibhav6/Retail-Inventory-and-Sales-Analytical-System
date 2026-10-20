@@ -15,6 +15,8 @@ export default function InvoiceModal({ order, onClose }) {
     minute: '2-digit'
   }) : 'Just Now';
 
+  const totalDiscount = Number(order.totalDiscount || order.total_discount || 0);
+
   return (
     <div className="modal-overlay" style={{ display: 'flex' }}>
       <div className="modal-card invoice-modal">
@@ -51,7 +53,9 @@ export default function InvoiceModal({ order, onClose }) {
                 <th>Product</th>
                 <th>HSN</th>
                 <th>Category</th>
-                <th>Price</th>
+                <th>Original Price</th>
+                <th>Discount</th>
+                <th>Discounted Price</th>
                 <th>Qty</th>
                 <th>Subtotal</th>
                 <th>GST</th>
@@ -59,31 +63,45 @@ export default function InvoiceModal({ order, onClose }) {
               </tr>
             </thead>
             <tbody>
-              {order.items && order.items.map((item, idx) => (
-                <tr key={idx}>
-                  <td>{idx + 1}</td>
-                  <td><strong>{item.name}</strong></td>
-                  <td><span className="code-pill">{item.hsn_code || item.hsn || 'N/A'}</span></td>
-                  <td>{item.category}</td>
-                  <td>₹{Number(item.price).toFixed(2)}</td>
-                  <td>{item.qty} {item.unit || 'pcs'}</td>
-                  <td>₹{Number(item.subtotal).toFixed(2)}</td>
-                  <td>₹{Number(item.gst).toFixed(2)}</td>
-                  <td className="font-bold">₹{Number(item.total).toFixed(2)}</td>
-                </tr>
-              ))}
+              {order.items && order.items.map((item, idx) => {
+                const origPrice = Number(item.original_price ?? item.price ?? 0);
+                const discPercent = Number(item.discount ?? item.discount_percent ?? 0);
+                const discAmt = Number(item.discount_amount ?? (origPrice * (discPercent / 100)));
+                const discPrice = Number(item.discounted_price ?? (origPrice - discAmt));
+                return (
+                  <tr key={idx}>
+                    <td>{idx + 1}</td>
+                    <td><strong>{item.name}</strong></td>
+                    <td><span className="code-pill">{item.hsn_code || item.hsn || 'N/A'}</span></td>
+                    <td>{item.category}</td>
+                    <td>₹{origPrice.toFixed(2)}</td>
+                    <td>{discPercent > 0 ? `${discPercent}% (-₹${discAmt.toFixed(2)})` : '0%'}</td>
+                    <td>₹{discPrice.toFixed(2)}</td>
+                    <td>{item.qty} {item.unit || 'pcs'}</td>
+                    <td>₹{Number(item.subtotal).toFixed(2)}</td>
+                    <td>₹{Number(item.gst).toFixed(2)}</td>
+                    <td className="font-bold">₹{Number(item.total).toFixed(2)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan="6" className="text-right font-bold">Subtotal:</td>
+                <td colSpan="8" className="text-right font-bold">Subtotal:</td>
                 <td colSpan="3" className="font-bold">₹{Number(order.subtotal).toFixed(2)}</td>
               </tr>
               <tr>
-                <td colSpan="6" className="text-right font-bold">GST Amount:</td>
+                <td colSpan="8" className="text-right font-bold">Total Discount:</td>
+                <td colSpan="3" className="font-bold text-success">
+                  {totalDiscount > 0 ? `-₹${totalDiscount.toFixed(2)}` : '₹0.00'}
+                </td>
+              </tr>
+              <tr>
+                <td colSpan="8" className="text-right font-bold">GST Amount:</td>
                 <td colSpan="3" className="font-bold">₹{Number(order.gstTotal).toFixed(2)}</td>
               </tr>
               <tr className="inv-grand-total-row">
-                <td colSpan="6" className="text-right font-bold">Grand Total:</td>
+                <td colSpan="8" className="text-right font-bold">Grand Total:</td>
                 <td colSpan="3" className="font-bold text-success">
                   ₹{Number(order.grandTotal).toFixed(2)}
                 </td>

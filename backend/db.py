@@ -137,7 +137,8 @@ def init_db():
                 price INT,
                 stock_quantity INT,
                 cost INT,
-                unit VARCHAR(10) DEFAULT 'pcs'
+                unit VARCHAR(10) DEFAULT 'pcs',
+                discount DECIMAL(5,2) DEFAULT 0.00
             )
             """)
 
@@ -188,6 +189,14 @@ def init_db():
             """, (DB_NAME,))
             if cur.fetchone()[0] == 0:
                 cur.execute("ALTER TABLE Products ADD COLUMN bundle_type VARCHAR(20) DEFAULT NULL")
+
+            # Ensure discount column exists for discount feature
+            cur.execute("""
+                SELECT COUNT(*) FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'Products' AND COLUMN_NAME = 'discount'
+            """, (DB_NAME,))
+            if cur.fetchone()[0] == 0:
+                cur.execute("ALTER TABLE Products ADD COLUMN discount DECIMAL(5,2) DEFAULT 0.00")
 
             # Customers table
             cur.execute("""

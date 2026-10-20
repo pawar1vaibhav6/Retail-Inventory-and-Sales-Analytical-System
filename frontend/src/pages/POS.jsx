@@ -57,21 +57,37 @@ export default function POS() {
 
   const productOptions = useMemo(
     () =>
-      products.map((p) => ({
-        value: String(p.id),
-        label: p.name,
-        sublabel: `#${p.id} • ${p.category} | ${p.subcategory}`,
-        searchText: `${p.id} ${p.name} ${p.category} ${p.subcategory}`,
-        disabled: p.stock <= 0,
-        right: (
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>
-              ₹{p.price}/{p.unit}
+      products.map((p) => {
+        const disc = Number(p.discount || 0);
+        const origPrice = Number(p.price || 0);
+        const discAmt = Math.round(origPrice * (disc / 100) * 100) / 100;
+        const finalPrice = Math.round((origPrice - discAmt) * 100) / 100;
+
+        return {
+          value: String(p.id),
+          label: p.name,
+          sublabel: `#${p.id} • ${p.category} | ${p.subcategory}${disc > 0 ? ` • ${disc}% off` : ''}`,
+          searchText: `${p.id} ${p.name} ${p.category} ${p.subcategory}`,
+          disabled: p.stock <= 0,
+          right: (
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>
+                {disc > 0 ? (
+                  <>
+                    <span style={{ textDecoration: 'line-through', fontSize: 11, color: 'var(--text-muted)', marginRight: 4 }}>
+                      ₹{origPrice}
+                    </span>
+                    ₹{finalPrice}/{p.unit}
+                  </>
+                ) : (
+                  `₹${origPrice}/${p.unit}`
+                )}
+              </div>
+              <StockPill stock={p.stock} unit={p.unit} />
             </div>
-            <StockPill stock={p.stock} unit={p.unit} />
-          </div>
-        ),
-      })),
+          ),
+        };
+      }),
     [products]
   );
 
@@ -111,10 +127,15 @@ export default function POS() {
     }
 
     const existingIndex = cart.findIndex((item) => item.id === selectedProduct.id);
+    const discount = Number(selectedProduct.discount || 0);
+    const origPrice = Number(selectedProduct.price || 0);
+    const discAmtUnit = Math.round(origPrice * (discount / 100) * 100) / 100;
+    const discPrice = Math.round((origPrice - discAmtUnit) * 100) / 100;
     const gstRate = getGstRate(selectedProduct.category);
-    const lineSubtotal = qty * selectedProduct.price;
-    const lineGst = lineSubtotal * gstRate;
-    const lineTotal = lineSubtotal + lineGst;
+    const gstPerUnit = Math.round(discPrice * gstRate * 100) / 100;
+    const lineSubtotal = Math.round(discPrice * qty * 100) / 100;
+    const lineGst = Math.round(gstPerUnit * qty * 100) / 100;
+    const lineTotal = Math.round((discPrice + gstPerUnit) * qty * 100) / 100;
 
     if (existingIndex >= 0) {
       const updated = [...cart];
@@ -126,14 +147,15 @@ export default function POS() {
         });
         return;
       }
-      const updatedSubtotal = newQty * selectedProduct.price;
-      const updatedGst = updatedSubtotal * gstRate;
+      const updatedSubtotal = Math.round(discPrice * newQty * 100) / 100;
+      const updatedGst = Math.round(gstPerUnit * newQty * 100) / 100;
+      const updatedTotal = Math.round((discPrice + gstPerUnit) * newQty * 100) / 100;
       updated[existingIndex] = {
         ...updated[existingIndex],
         qty: newQty,
         subtotal: updatedSubtotal,
         gst: updatedGst,
-        total: updatedSubtotal + updatedGst
+        total: updatedTotal
       };
       setCart(updated);
     } else {
@@ -144,7 +166,11 @@ export default function POS() {
           name: selectedProduct.name,
           category: selectedProduct.category,
           unit: selectedProduct.unit,
-          price: selectedProduct.price,
+          price: origPrice,
+          original_price: origPrice,
+          discount,
+          discount_amount: discAmtUnit,
+          discounted_price: discPrice,
           qty,
           subtotal: lineSubtotal,
           gstRate: gstRate * 100,
@@ -176,15 +202,18 @@ export default function POS() {
     }
 
     const updated = [...cart];
-    const subtotal = newQty * item.price;
-    const gstRate = item.gstRate / 100;
-    const gst = subtotal * gstRate;
+    const discPrice = Number(item.discounted_price ?? item.price);
+    const gstRate = (item.gstRate || 0) / 100;
+    const gstPerUnit = Math.round(discPrice * gstRate * 100) / 100;
+    const subtotal = Math.round(discPrice * newQty * 100) / 100;
+    const gst = Math.round(gstPerUnit * newQty * 100) / 100;
+    const total = Math.round((discPrice + gstPerUnit) * newQty * 100) / 100;
     updated[index] = {
       ...item,
       qty: newQty,
       subtotal,
       gst,
-      total: subtotal + gst
+      total
     };
     setCart(updated);
   };
@@ -200,6 +229,10 @@ export default function POS() {
 
   const subtotal = cart.reduce((acc, item) => acc + item.subtotal, 0);
   const gstTotal = cart.reduce((acc, item) => acc + item.gst, 0);
+  const totalDiscount = cart.reduce((acc, item) => {
+    const discAmt = Number(item.discount_amount || 0);
+    return acc + (discAmt * item.qty);
+  }, 0);
   const grandTotal = subtotal + gstTotal;
 
   const handleCheckout = async () => {
@@ -217,6 +250,7 @@ export default function POS() {
         customer: selectedCustomer,
         items: cart,
         subtotal,
+        totalDiscount,
         gstTotal,
         grandTotal
       });
@@ -421,6 +455,11 @@ export default function POS() {
                   <span>
                     Price: <strong>₹{selectedProduct.price} / {selectedProduct.unit}</strong>
                   </span>
+                  {selectedProduct.discount > 0 && (
+                    <span>
+                      Discount: <strong className="text-success">{selectedProduct.discount}% off</strong>
+                    </span>
+                  )}
                   <span>
                     Available: <strong className={selectedProduct.stock < 5 ? 'text-danger' : 'text-success'}>{selectedProduct.stock} {selectedProduct.unit}</strong>
                   </span>
@@ -502,8 +541,26 @@ export default function POS() {
                           <td>
                             <strong>{item.name}</strong>
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{item.category}</div>
+                            {item.discount > 0 && (
+                              <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>
+                                {item.discount}% off (-₹{Number(item.discount_amount).toFixed(2)})
+                              </span>
+                            )}
                           </td>
-                          <td>₹{item.price}/{item.unit}</td>
+                          <td>
+                            {item.discount > 0 ? (
+                              <>
+                                <span style={{ textDecoration: 'line-through', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                  ₹{item.original_price}
+                                </span>
+                                <br />
+                                <strong>₹{item.discounted_price}</strong>
+                                <small>/{item.unit}</small>
+                              </>
+                            ) : (
+                              <>₹{item.price}/{item.unit}</>
+                            )}
+                          </td>
                           <td>
                             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                               <button
@@ -561,6 +618,12 @@ export default function POS() {
                 <span>Subtotal (Excl. Tax):</span>
                 <span className="font-bold">₹{subtotal.toFixed(2)}</span>
               </div>
+              {totalDiscount > 0 && (
+                <div className="summary-line text-success">
+                  <span>Total Discount:</span>
+                  <span className="font-bold">-₹{totalDiscount.toFixed(2)}</span>
+                </div>
+              )}
               <div className="summary-line">
                 <span>Total GST:</span>
                 <span className="font-bold text-muted">₹{gstTotal.toFixed(2)}</span>
