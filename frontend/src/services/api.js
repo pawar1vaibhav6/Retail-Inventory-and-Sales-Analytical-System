@@ -193,3 +193,4 @@ export default {
   analytics: analyticsAPI,
   charts: chartsAPI
 };
+

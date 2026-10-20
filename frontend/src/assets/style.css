@@ -398,8 +398,8 @@ body,
 
 .sidebar-footer {
     padding: 0.85rem;
-    border-top: 1px solid var(--border);
-    background: var(--surface-header);
+    /* border-top: 1px solid var(--border); */
+    /* background: var(--surface-header); */
     display: flex;
     flex-direction: column;
     gap: 0.65rem;

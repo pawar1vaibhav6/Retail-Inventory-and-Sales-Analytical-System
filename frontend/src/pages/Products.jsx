@@ -242,7 +242,8 @@ export default function Products() {
                             </button>
                             <button
                               type="button"
-                              className="btn btn-sm btn-outline-success"
+                              className="btn btn-sm btn-outline-success text-black"
+                              style={{ color:"black"}}
                               onClick={() => handleOpenModal('restock', p)}
                               title="Replenish Warehouse Stock"
                             >

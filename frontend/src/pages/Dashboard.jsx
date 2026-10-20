@@ -29,14 +29,14 @@ export default function Dashboard() {
   return (
     <div className="dashboard-page container" style={{ padding: '1.5rem 1rem' }}>
       {/* Welcome Header Banner */}
-      <div className="welcome-card mb-4">
+      {/* <div className="welcome-card mb-4">
         <div className="welcome-info">
           <div className="avatar-circle">
             <i className="fa-solid fa-user-astronaut" />
           </div>
           <div>
             <h1>
-              Welcome back, <span className="highlight-text">{user?.username || 'User'}</span>!
+              Welcome Back, <span className="highlight-text">{user?.username || 'User'}</span>!
             </h1>
             <p className="subtitle">
               System Status:{' '}
@@ -56,7 +56,7 @@ export default function Dashboard() {
             {(user?.role || 'cashier').toUpperCase()} PORTAL
           </span>
         </div>
-      </div>
+      </div> */}
 
       {/* Quick Stats Grid */}
       <div className="stats-grid mb-4">
@@ -64,8 +64,8 @@ export default function Dashboard() {
           <div className="stat-icon icon-products">
             <i className="fa-solid fa-boxes-stacked" />
           </div>
-          <div className="stat-details">
-            <span className="stat-label">Total Products</span>
+          <div style={{display:'flex',justifyContent:"center",alignItems:'center'}} className="stat-details">
+           <span style={{ fontSize: "18px" }}className="stat-label">Total Products</span>
             <span className="stat-value">{totalProducts}</span>
           </div>
         </div>
@@ -74,8 +74,8 @@ export default function Dashboard() {
           <div className="stat-icon icon-customers">
             <i className="fa-solid fa-users" />
           </div>
-          <div className="stat-details">
-            <span className="stat-label">Total Customers</span>
+          <div style={{display:'flex',justifyContent:"center",alignItems:'center'}} className="stat-details">
+            <span style={{ fontSize: "18px" }} className="stat-label">Total Customers</span>
             <span className="stat-value">{totalCustomers}</span>
           </div>
         </div>
@@ -84,8 +84,8 @@ export default function Dashboard() {
           <div className="stat-icon icon-sales">
             <i className="fa-solid fa-receipt" />
           </div>
-          <div className="stat-details">
-            <span className="stat-label">Sales Recorded</span>
+          <div style={{display:'flex',justifyContent:"center",alignItems:'center'}} className="stat-details">
+            <span style={{ fontSize: "18px" }} className="stat-label">Sales Recorded</span>
             <span className="stat-value">{totalSales}</span>
           </div>
         </div>
@@ -94,8 +94,8 @@ export default function Dashboard() {
           <div className="stat-icon icon-alerts">
             <i className="fa-solid fa-triangle-exclamation" />
           </div>
-          <div className="stat-details">
-            <span className="stat-label">Low Stock Alerts (&lt; 5)</span>
+          <div style={{display:'flex',justifyContent:"center",alignItems:'center'}} className="stat-details">
+            <span style={{ fontSize: "18px" }} className="stat-label">Low Stock Alerts</span>
             <span className="stat-value">{lowStockCount}</span>
           </div>
         </div>
@@ -191,12 +191,7 @@ export default function Dashboard() {
               )}
             </div>
 
-            <div className="cli-notice">
-              <i className="fa-solid fa-terminal" />
-              <div>
-                <strong>Single Page Application (React):</strong> Clean modern reactive components with persistent theme tokens and instant state sync.
-              </div>
-            </div>
+            
           </div>
         </div>
 
