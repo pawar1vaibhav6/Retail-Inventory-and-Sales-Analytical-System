@@ -9,12 +9,16 @@ export default function CustomerModal({ isOpen, onClose, onSave }) {
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) return;
-    const newCust = onSave(formData);
-    setFormData({ name: '', email: '', region: '' });
-    onClose(newCust);
+    try {
+      const newCust = await onSave(formData);
+      setFormData({ name: '', email: '', region: '' });
+      onClose(newCust);
+    } catch (err) {
+      console.error('[CustomerModal] Save failed:', err);
+    }
   };
 
   return (

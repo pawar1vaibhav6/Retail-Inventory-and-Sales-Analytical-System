@@ -15,8 +15,9 @@ export default function Register() {
   const isPasswordMatch = password && confirmPassword && password === confirmPassword;
   const isPasswordMismatch = password && confirmPassword && password !== confirmPassword;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
     if (!username.trim()) {
       setError('Please choose a username.');
       return;
@@ -30,11 +31,15 @@ export default function Register() {
       return;
     }
 
-    const res = register(username, role);
-    if (res.success) {
-      navigate('/dashboard');
-    } else {
-      setError(res.message);
+    try {
+      const res = await register(username, password, role);
+      if (res.success) {
+        navigate('/dashboard');
+      } else {
+        setError(res.message);
+      }
+    } catch (err) {
+      setError(err.message || 'Registration failed.');
     }
   };
 

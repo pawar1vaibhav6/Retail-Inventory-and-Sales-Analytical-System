@@ -1,82 +1,118 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useStore } from '../context/StoreContext';
+import { analyticsAPI } from '../services/api';
 
 export default function Analytics() {
   const { products, orders } = useStore();
   const [selectedYear, setSelectedYear] = useState('2026');
+  const [availableYears, setAvailableYears] = useState(['2026', '2025']);
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    setLoading(true);
+    analyticsAPI.getAnalytics(selectedYear)
+      .then((data) => {
+        if (isMounted && data) {
+          setAnalyticsData(data);
+          if (data.available_years && data.available_years.length > 0) {
+            setAvailableYears(data.available_years.map(String));
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('[Analytics] Failed to fetch analytics from API:', err);
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedYear]);
 
   // Compute total realized inventory valuation
-  const inventoryValue = products.reduce((acc, p) => acc + p.stock * p.price, 0);
+  const inventoryValue = (analyticsData && analyticsData.inventory_value)
+    ? analyticsData.inventory_value
+    : products.reduce((acc, p) => acc + p.stock * p.price, 0);
 
-  // Generate monthly breakdown data from orders
+  // Monthly data from API with graceful fallback to order-based calculation
   const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  
-  const monthlyData = MONTH_NAMES.map((name, idx) => {
-    const monthNum = idx + 1;
-    // Base synthetic monthly curve plus actual orders
-    const baseRevenue = [45000, 52000, 61000, 58000, 72000, 68000, 79000, 84000, 91000, 105000, 0, 0][idx];
-    const baseCost = Math.round(baseRevenue * 0.72);
-    
-    // Add real orders matching month
-    const matchingOrders = orders.filter((o) => {
-      const d = new Date(o.date);
-      return d.getMonth() + 1 === monthNum;
-    });
+  let monthlyData = [];
 
-    const addRev = matchingOrders.reduce((sum, o) => sum + o.subtotal, 0);
-    const addCost = Math.round(addRev * 0.72);
+  if (analyticsData && analyticsData.monthly_sales && analyticsData.monthly_sales.length > 0) {
+    monthlyData = analyticsData.monthly_sales;
+  } else {
+    monthlyData = MONTH_NAMES.map((name, idx) => {
+      const monthNum = idx + 1;
+      const baseRevenue = [45000, 52000, 61000, 58000, 72000, 68000, 79000, 84000, 91000, 105000, 0, 0][idx];
+      const baseCost = Math.round(baseRevenue * 0.72);
 
-    const revenue = baseRevenue + addRev;
-    const cost = baseCost + addCost;
-    const profit = revenue - cost;
-    const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
-    const gst = Math.round(revenue * 0.08);
+      const matchingOrders = orders.filter((o) => {
+        const d = new Date(o.date);
+        return d.getMonth() + 1 === monthNum;
+      });
 
-    return {
-      monthNum,
-      name,
-      revenue,
-      cost,
-      profit,
-      margin,
-      gst
-    };
-  }).filter((m) => m.revenue > 0);
+      const addRev = matchingOrders.reduce((sum, o) => sum + (o.subtotal || 0), 0);
+      const addCost = Math.round(addRev * 0.72);
+
+      const revenue = baseRevenue + addRev;
+      const cost = baseCost + addCost;
+      const profit = revenue - cost;
+      const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+      const gst = Math.round(revenue * 0.08);
+
+      return {
+        monthNum,
+        name,
+        revenue,
+        cost,
+        profit,
+        margin,
+        gst
+      };
+    }).filter((m) => m.revenue > 0);
+  }
 
   // Category breakdown
-  const categoryStats = {};
-  products.forEach((p) => {
-    if (!categoryStats[p.category]) {
-      categoryStats[p.category] = { category: p.category, revenue: 0, cost: 0, profit: 0 };
-    }
-  });
-
-  // Distribute order items into categories
-  orders.forEach((o) => {
-    o.items && o.items.forEach((item) => {
-      const cat = item.category || 'General';
-      if (!categoryStats[cat]) {
-        categoryStats[cat] = { category: cat, revenue: 0, cost: 0, profit: 0 };
+  let displayCategories = [];
+  if (analyticsData && analyticsData.category_sales && analyticsData.category_sales.length > 0) {
+    displayCategories = analyticsData.category_sales;
+  } else {
+    const categoryStats = {};
+    products.forEach((p) => {
+      if (!categoryStats[p.category]) {
+        categoryStats[p.category] = { category: p.category, revenue: 0, cost: 0, profit: 0 };
       }
-      categoryStats[cat].revenue += item.subtotal;
-      categoryStats[cat].cost += Math.round(item.subtotal * 0.7);
-      categoryStats[cat].profit = categoryStats[cat].revenue - categoryStats[cat].cost;
     });
-  });
 
-  // Add default baseline category distribution for display
-  const defaultCategoryDist = [
-    { category: 'Cereals', revenue: 42000, cost: 30000, profit: 12000 },
-    { category: 'Oil Products', revenue: 38000, cost: 28000, profit: 10000 },
-    { category: 'Dry Fruits', revenue: 31000, cost: 22000, profit: 9000 },
-    { category: 'Milk', revenue: 26000, cost: 19000, profit: 7000 },
-    { category: 'Package Food', revenue: 22000, cost: 16000, profit: 6000 },
-    { category: 'Electronics', revenue: 19000, cost: 13000, profit: 6000 }
-  ];
+    orders.forEach((o) => {
+      o.items && o.items.forEach((item) => {
+        const cat = item.category || 'General';
+        if (!categoryStats[cat]) {
+          categoryStats[cat] = { category: cat, revenue: 0, cost: 0, profit: 0 };
+        }
+        categoryStats[cat].revenue += (item.subtotal || 0);
+        categoryStats[cat].cost += Math.round((item.subtotal || 0) * 0.7);
+        categoryStats[cat].profit = categoryStats[cat].revenue - categoryStats[cat].cost;
+      });
+    });
 
-  const categoryList = Object.values(categoryStats).filter((c) => c.revenue > 0);
-  const displayCategories = categoryList.length > 0 ? categoryList : defaultCategoryDist;
+    const defaultCategoryDist = [
+      { category: 'Cereals', revenue: 42000, cost: 30000, profit: 12000 },
+      { category: 'Oil Products', revenue: 38000, cost: 28000, profit: 10000 },
+      { category: 'Dry Fruits', revenue: 31000, cost: 22000, profit: 9000 },
+      { category: 'Milk', revenue: 26000, cost: 19000, profit: 7000 },
+      { category: 'Package Food', revenue: 22000, cost: 16000, profit: 6000 },
+      { category: 'Electronics', revenue: 19000, cost: 13000, profit: 6000 }
+    ];
+
+    const categoryList = Object.values(categoryStats).filter((c) => c.revenue > 0);
+    displayCategories = categoryList.length > 0 ? categoryList : defaultCategoryDist;
+  }
 
   return (
     <div className="analytics-container container" style={{ padding: '1.5rem 1rem' }}>
@@ -101,9 +137,11 @@ export default function Analytics() {
               className="form-control form-control-sm"
               value={selectedYear}
               onChange={(e) => setSelectedYear(e.target.value)}
+              disabled={loading}
             >
-              <option value="2026">2026</option>
-              <option value="2025">2025</option>
+              {availableYears.map((yr) => (
+                <option key={yr} value={yr}>{yr}</option>
+              ))}
             </select>
           </div>
           <Link to="/charts" className="btn btn-primary btn-sm" style={{ marginLeft: 8 }}>
@@ -116,7 +154,7 @@ export default function Analytics() {
       <div className="kpi-banner mb-4">
         <div className="kpi-content">
           <span className="kpi-label">Total Realized Inventory Valuation</span>
-          <h1 className="kpi-value">₹{inventoryValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h1>
+          <h1 className="kpi-value">₹{Number(inventoryValue).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h1>
           <span className="kpi-note">Computed across all active warehouse stocks at retail price</span>
         </div>
         <div className="kpi-badge">
@@ -152,12 +190,12 @@ export default function Analytics() {
                     <tr key={m.monthNum}>
                       <td>{m.monthNum}</td>
                       <td><strong>{m.name} {selectedYear}</strong></td>
-                      <td className="font-bold">₹{m.revenue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                      <td className="text-muted">₹{m.cost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                      <td className="text-success font-bold">₹{m.profit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                      <td className="font-bold">₹{Number(m.revenue).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                      <td className="text-muted">₹{Number(m.cost).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                      <td className="text-success font-bold">₹{Number(m.profit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                       <td>
-                        <span className={`badge ${m.margin > 20 ? 'badge-success' : 'badge-warning'}`}>
-                          {m.margin.toFixed(1)}%
+                        <span className={`badge ${(m.margin || 0) > 20 ? 'badge-success' : 'badge-warning'}`}>
+                          {(m.margin || 0).toFixed(1)}%
                         </span>
                       </td>
                     </tr>
@@ -191,9 +229,9 @@ export default function Analytics() {
                   {displayCategories.map((c) => (
                     <tr key={c.category}>
                       <td><span className="category-pill">{c.category}</span></td>
-                      <td>₹{c.revenue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                      <td className="text-muted">₹{c.cost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                      <td className="text-success font-bold">₹{c.profit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                      <td>₹{Number(c.revenue).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                      <td className="text-muted">₹{Number(c.cost).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                      <td className="text-success font-bold">₹{Number(c.profit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -223,7 +261,7 @@ export default function Analytics() {
                   {monthlyData.map((m) => (
                     <tr key={m.monthNum}>
                       <td><strong>{m.name}</strong></td>
-                      <td className="font-bold text-muted">₹{m.gst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                      <td className="font-bold text-muted">₹{Number(m.gst || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -235,4 +273,3 @@ export default function Analytics() {
     </div>
   );
 }
-

@@ -21,18 +21,22 @@ export default function Login() {
     });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
-      const res = login(username, password);
+    setAlert(null);
+    try {
+      const res = await login(username, password);
       if (res.success) {
         navigate('/dashboard');
       } else {
         setAlert({ type: 'danger', message: res.message });
-        setLoading(false);
       }
-    }, 300);
+    } catch (err) {
+      setAlert({ type: 'danger', message: err.message || 'Login failed.' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

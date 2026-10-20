@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { authAPI } from '../services/api';
 
 const AuthContext = createContext();
 
@@ -20,36 +21,46 @@ export function AuthProvider({ children }) {
     }
   }, [user]);
 
-  const login = (username, password) => {
-    const trimmed = (username || '').trim().toLowerCase();
+  const login = async (username, password) => {
+    const trimmed = (username || '').trim();
     if (!trimmed) {
       return { success: false, message: 'Please enter a valid username.' };
     }
-    // Simple role determination matching app logic
-    const role = (trimmed.includes('cashier')) ? 'cashier' : 'admin';
-    const authUser = {
-      id: trimmed === 'cashier' ? 2 : 1,
-      username: username.trim(),
-      role
-    };
-    setUser(authUser);
-    return { success: true, user: authUser };
+    try {
+      const res = await authAPI.login(trimmed, password);
+      if (res && res.success && res.user) {
+        setUser(res.user);
+        return { success: true, user: res.user };
+      }
+      return { success: false, message: res?.message || 'Login failed.' };
+    } catch (err) {
+      return { success: false, message: err.message || 'Server connection error.' };
+    }
   };
 
-  const register = (username, role) => {
+  const register = async (username, password, role) => {
     const trimmed = (username || '').trim();
     if (!trimmed) return { success: false, message: 'Username is required.' };
-    const authUser = {
-      id: Date.now() % 10000,
-      username: trimmed,
-      role: role || 'cashier'
-    };
-    setUser(authUser);
-    return { success: true, user: authUser };
+    try {
+      const res = await authAPI.register(trimmed, password, role);
+      if (res && res.success && res.user) {
+        setUser(res.user);
+        return { success: true, user: res.user };
+      }
+      return { success: false, message: res?.message || 'Registration failed.' };
+    } catch (err) {
+      return { success: false, message: err.message || 'Server connection error.' };
+    }
   };
 
-  const logout = () => {
-    setUser(null);
+  const logout = async () => {
+    try {
+      await authAPI.logout();
+    } catch {
+      // ignore network errors on logout
+    } finally {
+      setUser(null);
+    }
   };
 
   return (
@@ -62,4 +73,3 @@ export function AuthProvider({ children }) {
 export function useAuth() {
   return useContext(AuthContext);
 }
-

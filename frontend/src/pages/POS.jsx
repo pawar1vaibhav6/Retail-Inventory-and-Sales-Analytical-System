@@ -149,7 +149,7 @@ export default function POS() {
   const gstTotal = cart.reduce((acc, item) => acc + item.gst, 0);
   const grandTotal = subtotal + gstTotal;
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     if (!selectedCustomer) {
       setFeedback({ type: 'danger', message: 'Please select or register a customer before completing the sale.' });
       return;
@@ -159,17 +159,21 @@ export default function POS() {
       return;
     }
 
-    const order = recordSale({
-      customer: selectedCustomer,
-      items: cart,
-      subtotal,
-      gstTotal,
-      grandTotal
-    });
+    try {
+      const order = await recordSale({
+        customer: selectedCustomer,
+        items: cart,
+        subtotal,
+        gstTotal,
+        grandTotal
+      });
 
-    setCompletedOrder(order);
-    setCart([]);
-    setFeedback({ type: 'success', message: `Bill #INV-${order.billNumber} created successfully!` });
+      setCompletedOrder(order);
+      setCart([]);
+      setFeedback({ type: 'success', message: `Bill #INV-${order.billNumber} created successfully!` });
+    } catch (err) {
+      setFeedback({ type: 'danger', message: err.message || 'Checkout failed.' });
+    }
   };
 
   return (

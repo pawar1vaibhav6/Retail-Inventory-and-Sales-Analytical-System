@@ -31,23 +31,27 @@ export default function Products() {
     setModalState({ isOpen: false, mode: 'add', product: null });
   };
 
-  const handleSaveModal = (data) => {
-    if (modalState.mode === 'add') {
-      const created = addProduct(data);
-      setFeedback({ type: 'success', message: `Product "${created.name}" created successfully!` });
-    } else if (modalState.mode === 'price' && modalState.product) {
-      updateProduct(modalState.product.id, { price: data.price });
-      setFeedback({
-        type: 'success',
-        message: `Updated price for "${modalState.product.name}" to ₹${data.price}/${modalState.product.unit}.`
-      });
-    } else if (modalState.mode === 'restock' && modalState.product) {
-      const newStock = modalState.product.stock + data.addStock;
-      updateProduct(modalState.product.id, { stock: newStock });
-      setFeedback({
-        type: 'success',
-        message: `Restocked ${data.addStock} ${modalState.product.unit}. New Stock: ${newStock} ${modalState.product.unit}.`
-      });
+  const handleSaveModal = async (data) => {
+    try {
+      if (modalState.mode === 'add') {
+        const created = await addProduct(data);
+        setFeedback({ type: 'success', message: `Product "${created.name}" created successfully!` });
+      } else if (modalState.mode === 'price' && modalState.product) {
+        await updateProduct(modalState.product.id, { price: data.price });
+        setFeedback({
+          type: 'success',
+          message: `Updated price for "${modalState.product.name}" to ₹${data.price}/${modalState.product.unit || 'unit'}.`
+        });
+      } else if (modalState.mode === 'restock' && modalState.product) {
+        const newStock = Number(modalState.product.stock) + Number(data.addStock);
+        await updateProduct(modalState.product.id, { stock: newStock, addStock: data.addStock });
+        setFeedback({
+          type: 'success',
+          message: `Restocked ${data.addStock} ${modalState.product.unit || 'unit'}. New Stock: ${newStock} ${modalState.product.unit || 'unit'}.`
+        });
+      }
+    } catch (err) {
+      setFeedback({ type: 'danger', message: err.message || 'Operation failed.' });
     }
   };
 

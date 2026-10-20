@@ -2,12 +2,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Chart, registerables } from 'chart.js';
 import { useTheme } from '../context/ThemeContext';
+import { chartsAPI } from '../services/api';
 
 Chart.register(...registerables);
 
 export default function Charts() {
   const { theme } = useTheme();
   const [selectedYear, setSelectedYear] = useState('2026');
+  const [availableYears, setAvailableYears] = useState(['2026', '2025']);
+  const [chartData, setChartData] = useState(null);
 
   const monthlyRef = useRef(null);
   const categoryRef = useRef(null);
@@ -18,6 +21,26 @@ export default function Charts() {
   const categoryChartInstance = useRef(null);
   const dailyChartInstance = useRef(null);
   const weeklyChartInstance = useRef(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    chartsAPI.getChartData(selectedYear)
+      .then((data) => {
+        if (isMounted && data) {
+          setChartData(data);
+          if (data.available_years && data.available_years.length > 0) {
+            setAvailableYears(data.available_years.map(String));
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('[Charts] Failed to fetch chart data:', err);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedYear]);
 
   function getThemeTokens() {
     const style = getComputedStyle(document.documentElement);
@@ -65,6 +88,20 @@ export default function Charts() {
     Chart.defaults.color = tokens.textMuted;
     Chart.defaults.borderColor = tokens.border;
 
+    // Monthly data resolution
+    const monthlyLabels = (chartData?.monthly?.labels && chartData.monthly.labels.length > 0)
+      ? chartData.monthly.labels
+      : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'];
+    const monthlyRevenue = (chartData?.monthly?.revenue && chartData.monthly.revenue.length > 0)
+      ? chartData.monthly.revenue
+      : [45000, 52000, 61000, 58000, 72000, 68000, 79000, 84000, 91000, 105000];
+    const monthlyCost = (chartData?.monthly?.cost && chartData.monthly.cost.length > 0)
+      ? chartData.monthly.cost
+      : [32000, 37000, 44000, 41000, 51000, 49000, 56000, 60000, 65000, 74000];
+    const monthlyProfit = (chartData?.monthly?.profit && chartData.monthly.profit.length > 0)
+      ? chartData.monthly.profit
+      : [13000, 15000, 17000, 17000, 21000, 19000, 23000, 24000, 26000, 31000];
+
     // 1. Monthly Bar Chart
     if (monthlyRef.current) {
       if (monthlyChartInstance.current) monthlyChartInstance.current.destroy();
@@ -72,11 +109,11 @@ export default function Charts() {
       monthlyChartInstance.current = new Chart(ctx, {
         type: 'bar',
         data: {
-          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'],
+          labels: monthlyLabels,
           datasets: [
             {
               label: 'Revenue (₹)',
-              data: [45000, 52000, 61000, 58000, 72000, 68000, 79000, 84000, 91000, 105000],
+              data: monthlyRevenue,
               backgroundColor: tokens.revenueColor,
               borderColor: tokens.border,
               borderWidth: 1.5,
@@ -84,7 +121,7 @@ export default function Charts() {
             },
             {
               label: 'Cost (₹)',
-              data: [32000, 37000, 44000, 41000, 51000, 49000, 56000, 60000, 65000, 74000],
+              data: monthlyCost,
               backgroundColor: tokens.costColor,
               borderColor: tokens.border,
               borderWidth: 1.5,
@@ -92,7 +129,7 @@ export default function Charts() {
             },
             {
               label: 'Profit (₹)',
-              data: [13000, 15000, 17000, 17000, 21000, 19000, 23000, 24000, 26000, 31000],
+              data: monthlyProfit,
               backgroundColor: tokens.profitColor,
               borderColor: tokens.border,
               borderWidth: 1.5,
@@ -114,6 +151,14 @@ export default function Charts() {
       });
     }
 
+    // Category data resolution
+    const categoryLabels = (chartData?.category?.labels && chartData.category.labels.length > 0)
+      ? chartData.category.labels
+      : ['Cereals', 'Oil Products', 'Dry Fruits', 'Milk', 'Package Food', 'Electronics', 'Fruits', 'tea', 'Pulses', 'Beverages'];
+    const categoryValues = (chartData?.category?.revenue && chartData.category.revenue.length > 0)
+      ? chartData.category.revenue
+      : [42000, 38000, 31000, 26000, 22000, 19000, 15000, 12000, 9500, 6500];
+
     // 2. Category Doughnut Chart
     if (categoryRef.current) {
       if (categoryChartInstance.current) categoryChartInstance.current.destroy();
@@ -121,10 +166,10 @@ export default function Charts() {
       categoryChartInstance.current = new Chart(ctx, {
         type: 'doughnut',
         data: {
-          labels: ['Cereals', 'Oil Products', 'Dry Fruits', 'Milk', 'Package Food', 'Electronics', 'Fruits', 'tea', 'Pulses', 'Beverages'],
+          labels: categoryLabels,
           datasets: [
             {
-              data: [42000, 38000, 31000, 26000, 22000, 19000, 15000, 12000, 9500, 6500],
+              data: categoryValues,
               backgroundColor: tokens.categoryPalette,
               borderWidth: 2,
               borderColor: tokens.categoryBorder
@@ -141,6 +186,14 @@ export default function Charts() {
       });
     }
 
+    // Daily data resolution
+    const dailyLabels = (chartData?.daily?.labels && chartData.daily.labels.length > 0)
+      ? chartData.daily.labels
+      : ['Oct 11', 'Oct 12', 'Oct 13', 'Oct 14', 'Oct 15', 'Oct 16', 'Oct 17', 'Oct 18', 'Oct 19', 'Oct 20'];
+    const dailyValues = (chartData?.daily?.sales && chartData.daily.sales.length > 0)
+      ? chartData.daily.sales
+      : [3400, 4200, 3900, 5100, 4800, 5600, 6200, 5900, 6700, 7400];
+
     // 3. Daily Sales Line Chart
     if (dailyRef.current) {
       if (dailyChartInstance.current) dailyChartInstance.current.destroy();
@@ -148,11 +201,11 @@ export default function Charts() {
       dailyChartInstance.current = new Chart(ctx, {
         type: 'line',
         data: {
-          labels: ['Oct 11', 'Oct 12', 'Oct 13', 'Oct 14', 'Oct 15', 'Oct 16', 'Oct 17', 'Oct 18', 'Oct 19', 'Oct 20'],
+          labels: dailyLabels,
           datasets: [
             {
               label: 'Daily Revenue (₹)',
-              data: [3400, 4200, 3900, 5100, 4800, 5600, 6200, 5900, 6700, 7400],
+              data: dailyValues,
               borderColor: tokens.lineColor,
               backgroundColor: tokens.lineFill,
               fill: true,
@@ -177,6 +230,14 @@ export default function Charts() {
       });
     }
 
+    // Weekly data resolution
+    const weeklyLabels = (chartData?.weekly?.labels && chartData.weekly.labels.length > 0)
+      ? chartData.weekly.labels
+      : ['Week 38', 'Week 39', 'Week 40', 'Week 41', 'Week 42'];
+    const weeklyValues = (chartData?.weekly?.sales && chartData.weekly.sales.length > 0)
+      ? chartData.weekly.sales
+      : [28500, 31200, 29800, 34500, 38900];
+
     // 4. Weekly Sales Bar Chart
     if (weeklyRef.current) {
       if (weeklyChartInstance.current) weeklyChartInstance.current.destroy();
@@ -184,11 +245,11 @@ export default function Charts() {
       weeklyChartInstance.current = new Chart(ctx, {
         type: 'bar',
         data: {
-          labels: ['Week 38', 'Week 39', 'Week 40', 'Week 41', 'Week 42'],
+          labels: weeklyLabels,
           datasets: [
             {
               label: 'Weekly Sales (₹)',
-              data: [28500, 31200, 29800, 34500, 38900],
+              data: weeklyValues,
               backgroundColor: tokens.weeklyColor,
               borderColor: tokens.border,
               borderWidth: 1.5,
@@ -216,7 +277,7 @@ export default function Charts() {
       if (dailyChartInstance.current) dailyChartInstance.current.destroy();
       if (weeklyChartInstance.current) weeklyChartInstance.current.destroy();
     };
-  }, [theme, selectedYear]);
+  }, [theme, selectedYear, chartData]);
 
   return (
     <div className="charts-container container" style={{ padding: '1.5rem 1rem' }}>
@@ -242,8 +303,9 @@ export default function Charts() {
               value={selectedYear}
               onChange={(e) => setSelectedYear(e.target.value)}
             >
-              <option value="2026">2026</option>
-              <option value="2025">2025</option>
+              {availableYears.map((yr) => (
+                <option key={yr} value={yr}>{yr}</option>
+              ))}
             </select>
           </div>
           <Link to="/analytics" className="btn btn-secondary btn-sm" style={{ marginLeft: 8 }}>
@@ -252,60 +314,56 @@ export default function Charts() {
         </div>
       </div>
 
-      {/* Charts Grid (2x2) */}
+      {/* Charts Grid */}
       <div className="charts-grid">
-        {/* 1. Monthly Revenue & Profit */}
-        <div className="chart-card">
+        {/* 1. Monthly Revenue, Cost & Profit */}
+        <div className="chart-card grid-full mb-4">
           <div className="chart-header">
             <h4>
-              <i className="fa-solid fa-chart-bar" style={{ marginRight: 6 }} />
-              Monthly Revenue, Cost &amp; Profit
+              <i className="fa-solid fa-chart-simple" style={{ marginRight: 8 }} />
+              Monthly Financial Overview: Revenue vs Cost vs Net Profit ({selectedYear})
             </h4>
-            <span className="badge badge-primary">Bar Chart</span>
           </div>
-          <div className="chart-body" style={{ height: 320 }}>
+          <div className="chart-body" style={{ height: '320px', position: 'relative' }}>
             <canvas ref={monthlyRef} />
           </div>
         </div>
 
         {/* 2. Category Distribution */}
-        <div className="chart-card">
+        <div className="chart-card mb-4">
           <div className="chart-header">
             <h4>
-              <i className="fa-solid fa-chart-pie" style={{ marginRight: 6 }} />
-              Revenue by Category
+              <i className="fa-solid fa-chart-pie" style={{ marginRight: 8 }} />
+              Category Revenue Share
             </h4>
-            <span className="badge badge-success">Doughnut</span>
           </div>
-          <div className="chart-body" style={{ height: 320 }}>
+          <div className="chart-body" style={{ height: '280px', position: 'relative' }}>
             <canvas ref={categoryRef} />
           </div>
         </div>
 
-        {/* 3. Daily Sales Trend */}
-        <div className="chart-card">
+        {/* 3. Daily Sales Velocity */}
+        <div className="chart-card mb-4">
           <div className="chart-header">
             <h4>
-              <i className="fa-solid fa-chart-line" style={{ marginRight: 6 }} />
-              Daily Sales Trend (Recent 10 Days)
+              <i className="fa-solid fa-arrow-trend-up" style={{ marginRight: 8 }} />
+              Daily Sales Trend (Recent Active Days)
             </h4>
-            <span className="badge badge-info">Line Trend</span>
           </div>
-          <div className="chart-body" style={{ height: 320 }}>
+          <div className="chart-body" style={{ height: '280px', position: 'relative' }}>
             <canvas ref={dailyRef} />
           </div>
         </div>
 
-        {/* 4. Weekly Sales Comparison */}
-        <div className="chart-card">
+        {/* 4. Weekly Sales Velocity */}
+        <div className="chart-card grid-full mb-4">
           <div className="chart-header">
             <h4>
-              <i className="fa-solid fa-calendar-week" style={{ marginRight: 6 }} />
-              Weekly Sales Volume
+              <i className="fa-solid fa-bars-progress" style={{ marginRight: 8 }} />
+              Weekly Sales Volume &amp; Momentum ({selectedYear})
             </h4>
-            <span className="badge badge-warning">Weekly</span>
           </div>
-          <div className="chart-body" style={{ height: 320 }}>
+          <div className="chart-body" style={{ height: '260px', position: 'relative' }}>
             <canvas ref={weeklyRef} />
           </div>
         </div>
@@ -313,4 +371,3 @@ export default function Charts() {
     </div>
   );
 }
-

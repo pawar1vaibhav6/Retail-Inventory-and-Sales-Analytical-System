@@ -1,14 +1,30 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useStore } from '../context/StoreContext';
+import { dashboardAPI } from '../services/api';
 
 export default function Dashboard() {
   const { user } = useAuth();
   const { products, customers, orders } = useStore();
+  const [serverStats, setServerStats] = useState(null);
 
-  const lowStockItems = products.filter((p) => p.stock < 5);
+  useEffect(() => {
+    dashboardAPI.getStats()
+      .then((data) => setServerStats(data))
+      .catch((err) => console.warn('[Dashboard] Could not load server stats:', err));
+  }, []);
+
+  const lowStockItems = serverStats && serverStats.low_stock_items && serverStats.low_stock_items.length > 0
+    ? serverStats.low_stock_items
+    : products.filter((p) => p.stock < 5);
+
   const recentOrders = orders.slice(0, 5);
+
+  const totalProducts = serverStats ? serverStats.products_count : products.length;
+  const totalCustomers = serverStats ? serverStats.customers_count : customers.length;
+  const totalSales = serverStats ? serverStats.sales_count : orders.length;
+  const lowStockCount = serverStats ? serverStats.low_stock_count : lowStockItems.length;
 
   return (
     <div className="dashboard-page container" style={{ padding: '1.5rem 1rem' }}>
@@ -50,7 +66,7 @@ export default function Dashboard() {
           </div>
           <div className="stat-details">
             <span className="stat-label">Total Products</span>
-            <span className="stat-value">{products.length}</span>
+            <span className="stat-value">{totalProducts}</span>
           </div>
         </div>
 
@@ -60,7 +76,7 @@ export default function Dashboard() {
           </div>
           <div className="stat-details">
             <span className="stat-label">Total Customers</span>
-            <span className="stat-value">{customers.length}</span>
+            <span className="stat-value">{totalCustomers}</span>
           </div>
         </div>
 
@@ -70,17 +86,17 @@ export default function Dashboard() {
           </div>
           <div className="stat-details">
             <span className="stat-label">Sales Recorded</span>
-            <span className="stat-value">{orders.length}</span>
+            <span className="stat-value">{totalSales}</span>
           </div>
         </div>
 
-        <div className={`stat-card ${lowStockItems.length > 0 ? 'alert-stat' : ''}`}>
+        <div className={`stat-card ${lowStockCount > 0 ? 'alert-stat' : ''}`}>
           <div className="stat-icon icon-alerts">
             <i className="fa-solid fa-triangle-exclamation" />
           </div>
           <div className="stat-details">
             <span className="stat-label">Low Stock Alerts (&lt; 5)</span>
-            <span className="stat-value">{lowStockItems.length}</span>
+            <span className="stat-value">{lowStockCount}</span>
           </div>
         </div>
       </div>

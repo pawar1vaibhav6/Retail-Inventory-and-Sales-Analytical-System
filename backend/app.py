@@ -1,19 +1,41 @@
 import datetime
 import os
+import pymysql
 from functools import wraps
-from flask import (
-    Flask, render_template, request, redirect, url_for, session, flash, jsonify
-)
+from flask import Flask, request, session, jsonify
+from flask_cors import CORS
+
+# Load environment variables from .env
+env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(env_path):
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+
 import db
 from db import verify_user, register_user, get_connection, get_product_unit, normalize_subcategory
 
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "retail-inventory-analytical-system-secret-key-2026")
+app.secret_key = os.getenv("SECRET_KEY", "retailsphere-secure-secret-key-2026")
+
+# Configure CORS for React dev servers
+cors_origins_raw = os.getenv(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174"
+)
+cors_origins = [origin.strip() for origin in cors_origins_raw.split(",") if origin.strip()]
+CORS(app, origins=cors_origins, supports_credentials=True)
 
 # GST category definitions matching existing logic
 GST_RATES = {
-    "0": ["Fruits", "Vegetables", "Milk", "Pulses", "Stationery", "Grocery"],
-    "10": ["Package Food", "Oil Products", "Dry Fruits", "Spices", "tea", "coffee", "Sports", "PersonalCare"],
+    "0": ["Fruits", "Vegetables", "Milk", "Pulses", "Stationery", "Grocery", "Cereals"],
+    "10": ["Package Food", "Oil Products", "Dry Fruits", "Spices", "tea", "coffee", "Beverages", "Sports", "PersonalCare"],
     "18": ["Electronics", "Furniture", "Fashion", "Accessories"]
 }
 
@@ -23,71 +45,38 @@ def get_gst_rate(category):
         if any(c.lower() == (category or "").lower() for c in cats):
             rate = float(rate_str) / 100.0
             return rate, rate / 2.0, rate / 2.0
-    return 0.0, 0.0, 0.0
+    return 0.05, 0.025, 0.025
 
 
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if "user_id" not in session:
-            flash("Please sign in to access this page.", "warning")
-            return redirect(url_for("login", next=request.url))
-        return f(*args, **kwargs)
-    return decorated_function
+# Global JSON error handling
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"success": False, "message": "Resource not found."}), 404
 
 
-def admin_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if session.get("role") != "admin":
-            flash("Access denied. Admin privileges required.", "danger")
-            return redirect(url_for("dashboard"))
-        return f(*args, **kwargs)
-    return decorated_function
+@app.errorhandler(500)
+def server_error(e):
+    return jsonify({"success": False, "message": f"Internal server error: {e}"}), 500
 
 
 # -------------------------------------------------------------------------
-# Authentication Routes
+# Health Check Endpoint
 # -------------------------------------------------------------------------
-
-@app.route("/")
-def index():
-    if "user_id" in session:
-        return redirect(url_for("dashboard"))
-    return redirect(url_for("login"))
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if "user_id" in session:
-        return redirect(url_for("dashboard"))
-
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "").strip()
-
-        if not username or not password:
-            flash("Please enter both username and password.", "danger")
-            return render_template("login.html", username=username)
-
-        user = verify_user(username, password)
-        if user:
-            session["user_id"] = user["user_id"]
-            session["username"] = user["username"]
-            session["role"] = user["role"]
-            flash(f"Welcome back, {user['username']}! Logged in as {user['role'].capitalize()}.", "success")
-            next_page = request.args.get("next")
-            return redirect(next_page or url_for("dashboard"))
-        else:
-            flash("Invalid username or password. Please try again.", "danger")
-            return render_template("login.html", username=username)
-
-    return render_template("login.html")
+@app.route("/api/health", methods=["GET"])
+def health_check():
+    return jsonify({
+        "status": "healthy",
+        "service": "RetailSphere Backend API",
+        "timestamp": datetime.datetime.now().isoformat()
+    })
 
 
+# -------------------------------------------------------------------------
+# Authentication Endpoints
+# -------------------------------------------------------------------------
+@app.route("/api/auth/login", methods=["POST"])
 @app.route("/api/login", methods=["POST"])
 def api_login():
-    """Dynamic AJAX Login endpoint."""
     data = request.get_json(silent=True) or request.form
     username = data.get("username", "").strip()
     password = data.get("password", "").strip()
@@ -102,59 +91,74 @@ def api_login():
         session["role"] = user["role"]
         return jsonify({
             "success": True,
-            "message": f"Welcome, {user['username']}!",
-            "role": user["role"],
-            "redirect": url_for("dashboard")
+            "message": f"Welcome back, {user['username']}!",
+            "user": {
+                "id": user["user_id"],
+                "username": user["username"],
+                "role": user["role"]
+            }
         })
     return jsonify({"success": False, "message": "Invalid username or password."}), 401
 
 
-@app.route("/register", methods=["GET", "POST"])
-def register():
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "").strip()
-        confirm_password = request.form.get("confirm_password", "").strip()
-        role = request.form.get("role", "cashier").strip().lower()
+@app.route("/api/auth/register", methods=["POST"])
+@app.route("/api/register", methods=["POST"])
+def api_register():
+    data = request.get_json(silent=True) or request.form
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    role = data.get("role", "cashier").strip().lower()
 
-        if not username or not password or not confirm_password:
-            flash("All fields are required.", "danger")
-            return render_template("register.html", username=username, role=role)
+    if not username or not password:
+        return jsonify({"success": False, "message": "Username and password are required."}), 400
 
-        if len(password) < 4:
-            flash("Password must be at least 4 characters long.", "danger")
-            return render_template("register.html", username=username, role=role)
+    if len(password) < 4:
+        return jsonify({"success": False, "message": "Password must be at least 4 characters long."}), 400
 
-        if password != confirm_password:
-            flash("Passwords do not match.", "danger")
-            return render_template("register.html", username=username, role=role)
+    if role not in ("admin", "cashier"):
+        role = "cashier"
 
-        success, msg = register_user(username, password, role)
-        if success:
-            flash(f"Account for '{username}' created successfully! You can now log in.", "success")
-            return redirect(url_for("login"))
-        else:
-            flash(msg, "danger")
-            return render_template("register.html", username=username, role=role)
+    success, msg = register_user(username, password, role)
+    if success:
+        user = verify_user(username, password)
+        if user:
+            session["user_id"] = user["user_id"]
+            session["username"] = user["username"]
+            session["role"] = user["role"]
+        return jsonify({
+            "success": True,
+            "message": f"Account for '{username}' created successfully!",
+            "user": user or {"id": 1, "username": username, "role": role}
+        })
+    return jsonify({"success": False, "message": msg}), 400
 
-    return render_template("register.html")
 
-
-@app.route("/logout")
-def logout():
-    uname = session.get("username", "User")
+@app.route("/api/auth/logout", methods=["POST", "GET"])
+@app.route("/api/logout", methods=["POST", "GET"])
+def api_logout():
     session.clear()
-    flash(f"You have been successfully logged out, {uname}.", "info")
-    return redirect(url_for("login"))
+    return jsonify({"success": True, "message": "Successfully logged out."})
+
+
+@app.route("/api/auth/me", methods=["GET"])
+def api_me():
+    if "user_id" in session:
+        return jsonify({
+            "success": True,
+            "user": {
+                "id": session["user_id"],
+                "username": session["username"],
+                "role": session.get("role", "cashier")
+            }
+        })
+    return jsonify({"success": False, "user": None})
 
 
 # -------------------------------------------------------------------------
-# Dashboard
+# Dashboard Statistics Endpoint
 # -------------------------------------------------------------------------
-
-@app.route("/dashboard")
-@login_required
-def dashboard():
+@app.route("/api/dashboard/stats", methods=["GET"])
+def api_dashboard_stats():
     conn = get_connection()
     stats = {
         "products_count": 0,
@@ -166,7 +170,6 @@ def dashboard():
         "recent_sales": [],
         "low_stock_items": []
     }
-
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM Products")
@@ -178,86 +181,437 @@ def dashboard():
             cur.execute("SELECT COUNT(*), COALESCE(SUM(total_amount), 0) FROM Sales")
             sales_row = cur.fetchone()
             stats["sales_count"] = sales_row[0]
-            stats["total_sales_amount"] = sales_row[1]
+            stats["total_sales_amount"] = int(sales_row[1])
 
             cur.execute("SELECT COALESCE(SUM(price * stock_quantity), 0) FROM Products")
-            stats["inventory_value"] = cur.fetchone()[0]
-
-            cur.execute("SELECT product_id, p_name, category, price, stock_quantity, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing') FROM Products WHERE stock_quantity < 5 ORDER BY stock_quantity ASC")
-            stats["low_stock_items"] = cur.fetchall()
-            stats["low_stock_count"] = len(stats["low_stock_items"])
+            stats["inventory_value"] = int(cur.fetchone()[0])
 
             cur.execute("""
-                SELECT s.sales_id, p.p_name, s.quantity, s.total_amount, s.gst_amount, s.Date, COALESCE(p.unit, 'pcs') AS unit 
+                SELECT product_id, p_name, category, price, stock_quantity, cost, 
+                       COALESCE(unit, 'pcs') AS unit, COALESCE(subcategory, 'Packing') AS subcategory 
+                FROM Products 
+                WHERE stock_quantity < 5 
+                ORDER BY stock_quantity ASC
+            """)
+            low_items = []
+            for r in cur.fetchall():
+                low_items.append({
+                    "id": r[0],
+                    "name": r[1],
+                    "category": r[2],
+                    "price": r[3],
+                    "stock": r[4],
+                    "cost": r[5],
+                    "unit": r[6],
+                    "subcategory": r[7]
+                })
+            stats["low_stock_items"] = low_items
+            stats["low_stock_count"] = len(low_items)
+
+            cur.execute("""
+                SELECT s.sales_id, p.p_name, s.quantity, s.total_amount, s.gst_amount, s.Date, 
+                       COALESCE(p.unit, 'pcs') AS unit, s.customer_id
                 FROM Sales s 
                 LEFT JOIN Products p ON s.product_id = p.product_id 
                 ORDER BY s.sales_id DESC LIMIT 5
             """)
-            stats["recent_sales"] = cur.fetchall()
-    except Exception as e:
-        flash(f"Error fetching dashboard statistics: {e}", "warning")
+            recent = []
+            for r in cur.fetchall():
+                recent.append({
+                    "id": r[0],
+                    "productName": r[1] or "Unknown Product",
+                    "quantity": r[2],
+                    "totalAmount": r[3],
+                    "gstAmount": r[4],
+                    "date": r[5].isoformat() if hasattr(r[5], "isoformat") else str(r[5]),
+                    "unit": r[6],
+                    "customerId": r[7]
+                })
+            stats["recent_sales"] = recent
     finally:
         conn.close()
 
-    return render_template("dashboard.html", user=session, stats=stats)
+    return jsonify(stats)
 
 
 # -------------------------------------------------------------------------
-# POS / Billing Module
+# Products & Inventory Management Endpoints
 # -------------------------------------------------------------------------
+@app.route("/api/products", methods=["GET"])
+def api_get_products():
+    search = request.args.get("search", "").strip()
+    category = request.args.get("category", "").strip()
+    subcategory = request.args.get("subcategory", "").strip()
 
-@app.route("/pos")
-@login_required
-def pos():
     conn = get_connection()
-    products = []
-    customers = []
+    products_list = []
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT product_id, p_name, category, price, stock_quantity, COALESCE(unit, 'pcs') AS unit, COALESCE(subcategory, 'Packing') AS subcategory FROM Products ORDER BY p_name ASC")
-            products = cur.fetchall()
+            query = """
+                SELECT product_id, p_name, category, price, stock_quantity, cost, 
+                       COALESCE(unit, 'pcs') AS unit, COALESCE(subcategory, 'Packing') AS subcategory 
+                FROM Products WHERE 1=1
+            """
+            params = []
+            if search:
+                query += " AND (p_name LIKE %s OR CAST(product_id AS CHAR) LIKE %s)"
+                params.extend([f"%{search}%", f"%{search}%"])
+            if category:
+                query += " AND category = %s"
+                params.append(category)
+            if subcategory:
+                query += " AND subcategory = %s"
+                params.append(subcategory)
 
-            cur.execute("SELECT customer_id, c_name, email, region FROM Customers ORDER BY c_name ASC")
-            customers = cur.fetchall()
+            query += " ORDER BY product_id ASC"
+            cur.execute(query, params)
+
+            for r in cur.fetchall():
+                products_list.append({
+                    "id": r[0],
+                    "name": r[1],
+                    "category": r[2],
+                    "price": r[3],
+                    "stock": r[4],
+                    "cost": r[5],
+                    "unit": r[6],
+                    "subcategory": r[7]
+                })
     finally:
         conn.close()
 
-    return render_template("pos.html", products=products, customers=customers)
+    return jsonify(products_list)
 
 
+@app.route("/api/products", methods=["POST"])
+def api_add_product():
+    data = request.get_json(silent=True) or request.form
+    try:
+        conn = get_connection()
+        try:
+            with conn.cursor() as cur:
+                pid = data.get("id") or data.get("product_id")
+                if not pid:
+                    cur.execute("SELECT COALESCE(MAX(product_id), 100) + 1 FROM Products")
+                    pid = cur.fetchone()[0]
+                else:
+                    pid = int(pid)
+
+                p_name = (data.get("name") or data.get("p_name") or "").strip()
+                if not p_name:
+                    return jsonify({"success": False, "message": "Product name is required."}), 400
+
+                category = (data.get("category") or "General").strip()
+                subcat_input = (data.get("subcategory") or "Packing").strip()
+                subcategory = normalize_subcategory(subcat_input)
+
+                unit_input = (data.get("unit") or "").strip()
+                unit = get_product_unit(category, p_name, explicit_unit=unit_input, subcategory=subcategory)
+
+                price = int(float(data.get("price") or 0))
+                stock = int(float(data.get("stock") or data.get("stock_quantity") or 0))
+                cost = int(float(data.get("cost") or 0))
+
+                cur.execute(
+                    "INSERT INTO Products (product_id, p_name, category, subcategory, price, stock_quantity, cost, unit) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    (pid, p_name, category, subcategory, price, stock, cost, unit)
+                )
+                conn.commit()
+
+                product = {
+                    "id": pid,
+                    "name": p_name,
+                    "category": category,
+                    "subcategory": subcategory,
+                    "price": price,
+                    "stock": stock,
+                    "cost": cost,
+                    "unit": unit
+                }
+                return jsonify({
+                    "success": True,
+                    "message": f"Product '{p_name}' (#{pid}) added successfully.",
+                    "product": product
+                }), 201
+        except pymysql.err.IntegrityError:
+            conn.rollback()
+            return jsonify({"success": False, "message": f"Product ID #{pid} already exists."}), 400
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Failed to add product: {e}"}), 500
+
+
+@app.route("/api/products/<int:pid>/price", methods=["PUT", "POST"])
+def api_update_product_price(pid):
+    data = request.get_json(silent=True) or request.form
+    new_price = data.get("new_price") or data.get("price")
+    if new_price is None:
+        return jsonify({"success": False, "message": "New price is required."}), 400
+
+    try:
+        new_price = int(float(new_price))
+        conn = get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE Products SET price = %s WHERE product_id = %s", (new_price, pid))
+                conn.commit()
+                if cur.rowcount > 0:
+                    return jsonify({
+                        "success": True,
+                        "id": pid,
+                        "price": new_price,
+                        "message": f"Updated price for Product #{pid} to ₹{new_price}."
+                    })
+                return jsonify({"success": False, "message": f"Product #{pid} not found."}), 404
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Failed to update price: {e}"}), 500
+
+
+@app.route("/api/products/<int:pid>/restock", methods=["POST"])
+def api_restock_product(pid):
+    data = request.get_json(silent=True) or request.form
+    added_stock = data.get("added_stock") or data.get("stock")
+    if not added_stock:
+        return jsonify({"success": False, "message": "Added stock quantity is required."}), 400
+
+    try:
+        added_stock = int(float(added_stock))
+        if added_stock <= 0:
+            return jsonify({"success": False, "message": "Added stock must be greater than zero."}), 400
+
+        conn = get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT cost, p_name, category, stock_quantity, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing') FROM Products WHERE product_id = %s",
+                    (pid,)
+                )
+                row = cur.fetchone()
+                if not row:
+                    return jsonify({"success": False, "message": f"Product #{pid} not found."}), 404
+
+                cost, p_name, cat, current_stock, raw_unit, raw_subcat = row
+                unit = get_product_unit(cat, p_name, explicit_unit=raw_unit, subcategory=raw_subcat)
+                total_restock_cost = cost * added_stock
+                new_stock = current_stock + added_stock
+
+                cur.execute("UPDATE Products SET stock_quantity = stock_quantity + %s WHERE product_id = %s", (added_stock, pid))
+                cur.execute(
+                    "INSERT INTO stock (product_id, Restock_date, Added_stock, total_cost) VALUES (%s, NOW(), %s, %s)",
+                    (pid, added_stock, total_restock_cost)
+                )
+                conn.commit()
+
+                return jsonify({
+                    "success": True,
+                    "id": pid,
+                    "added": added_stock,
+                    "stock": new_stock,
+                    "totalCost": total_restock_cost,
+                    "message": f"Restocked {added_stock} {unit} for '{p_name}'. Replenishment cost: ₹{total_restock_cost}."
+                })
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Failed to restock product: {e}"}), 500
+
+
+@app.route("/api/products/<int:pid>", methods=["DELETE"])
+def api_delete_product(pid):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            # First check if exists
+            cur.execute("SELECT p_name FROM Products WHERE product_id = %s", (pid,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"success": False, "message": f"Product #{pid} not found."}), 404
+
+            p_name = row[0]
+            # Safely handle references in stock or sales if foreign keys exist
+            cur.execute("DELETE FROM stock WHERE product_id = %s", (pid,))
+            cur.execute("DELETE FROM Products WHERE product_id = %s", (pid,))
+            conn.commit()
+            return jsonify({
+                "success": True,
+                "id": pid,
+                "message": f"Product '{p_name}' (#{pid}) removed from catalog."
+            })
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": f"Failed to delete product: {e}"}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/products/categories", methods=["GET"])
+def api_product_categories():
+    conn = get_connection()
+    categories = []
+    subcategories = []
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT category FROM Products WHERE category IS NOT NULL AND category != '' ORDER BY category ASC")
+            categories = [r[0] for r in cur.fetchall()]
+
+            cur.execute("SELECT DISTINCT subcategory FROM Products WHERE subcategory IS NOT NULL AND subcategory != '' ORDER BY subcategory ASC")
+            subcategories = [r[0] for r in cur.fetchall()]
+            if not subcategories:
+                subcategories = ["Packing", "Open"]
+    finally:
+        conn.close()
+
+    return jsonify({
+        "categories": categories,
+        "subcategories": subcategories
+    })
+
+
+# -------------------------------------------------------------------------
+# Customers Module Endpoints
+# -------------------------------------------------------------------------
+@app.route("/api/customers", methods=["GET"])
+def api_get_customers():
+    search = request.args.get("search", "").strip()
+    conn = get_connection()
+    customers_list = []
+    try:
+        with conn.cursor() as cur:
+            query = """
+                SELECT c.customer_id, c.c_name, c.email, c.region, 
+                       COUNT(s.sales_id) AS total_visits, 
+                       COALESCE(SUM(s.total_amount + s.gst_amount), 0) AS total_spent 
+                FROM Customers c 
+                LEFT JOIN Sales s ON c.customer_id = s.customer_id 
+                WHERE 1=1
+            """
+            params = []
+            if search:
+                query += " AND (c.c_name LIKE %s OR c.email LIKE %s OR c.region LIKE %s OR CAST(c.customer_id AS CHAR) LIKE %s)"
+                params.extend([f"%{search}%", f"%{search}%", f"%{search}%", f"%{search}%"])
+
+            query += " GROUP BY c.customer_id, c.c_name, c.email, c.region ORDER BY c.customer_id ASC"
+            cur.execute(query, params)
+
+            for r in cur.fetchall():
+                customers_list.append({
+                    "id": r[0],
+                    "name": r[1],
+                    "email": r[2],
+                    "region": r[3],
+                    "totalVisits": r[4],
+                    "totalSpent": int(r[5])
+                })
+    finally:
+        conn.close()
+
+    return jsonify(customers_list)
+
+
+@app.route("/api/customers", methods=["POST"])
+@app.route("/api/customers/quick-add", methods=["POST"])
+def api_add_customer():
+    data = request.get_json(silent=True) or request.form
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cid = data.get("id") or data.get("customer_id")
+            if not cid:
+                cur.execute("SELECT COALESCE(MAX(customer_id), 0) + 1 FROM Customers")
+                cid = cur.fetchone()[0]
+            else:
+                cid = int(cid)
+
+            c_name = (data.get("name") or data.get("c_name") or "").strip()
+            if not c_name:
+                return jsonify({"success": False, "message": "Customer name is required."}), 400
+
+            email = (data.get("email") or f"customer{cid}@retail.com").strip()
+            region = (data.get("region") or "General").strip()
+
+            cur.execute("SELECT customer_id FROM Customers WHERE customer_id = %s", (cid,))
+            if cur.fetchone():
+                return jsonify({"success": False, "message": f"Customer ID #{cid} already exists."}), 400
+
+            cur.execute(
+                "INSERT INTO Customers (customer_id, c_name, email, region) VALUES (%s, %s, %s, %s)",
+                (cid, c_name, email, region)
+            )
+            conn.commit()
+            return jsonify({
+                "success": True,
+                "message": f"Customer '{c_name}' (#{cid}) registered successfully.",
+                "customer": {
+                    "id": cid,
+                    "name": c_name,
+                    "email": email,
+                    "region": region,
+                    "totalVisits": 0,
+                    "totalSpent": 0
+                }
+            }), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": f"Failed to add customer: {e}"}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/customers/<int:cid>", methods=["GET"])
+@app.route("/api/customers/check/<int:cid>", methods=["GET"])
+def api_get_customer_by_id(cid):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT customer_id, c_name, email, region FROM Customers WHERE customer_id = %s", (cid,))
+            row = cur.fetchone()
+            if row:
+                return jsonify({
+                    "exists": True,
+                    "customer": {
+                        "id": row[0],
+                        "name": row[1],
+                        "email": row[2],
+                        "region": row[3]
+                    }
+                })
+            return jsonify({"exists": False, "customer_id": cid})
+    finally:
+        conn.close()
+
+
+# -------------------------------------------------------------------------
+# POS / Checkout Endpoint
+# -------------------------------------------------------------------------
 @app.route("/api/pos/checkout", methods=["POST"])
-@login_required
-def pos_checkout():
+def api_pos_checkout():
     data = request.get_json(silent=True) or {}
-    customer_id = data.get("customer_id")
-    items = data.get("items", [])  # list of {product_id, quantity}
+    customer_info = data.get("customer") or {}
+    customer_id = data.get("customer_id") or customer_info.get("id")
+    items = data.get("items", [])
 
     if not customer_id or not items:
-        return jsonify({"success": False, "message": "Customer and at least one item are required."}), 400
+        return jsonify({"success": False, "message": "Customer ID and at least one item are required."}), 400
 
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            # Check customer
+            # Verify or auto-register customer
             cur.execute("SELECT customer_id, c_name, email, region FROM Customers WHERE customer_id = %s", (customer_id,))
             customer = cur.fetchone()
             if not customer:
-                c_name = (data.get("customer_name") or data.get("c_name") or data.get("name") or "").strip()
-                email = (data.get("customer_email") or data.get("email") or f"customer{customer_id}@retail.com").strip()
-                region = (data.get("customer_region") or data.get("region") or "General").strip()
+                c_name = customer_info.get("name") or data.get("customer_name") or f"Customer {customer_id}"
+                email = customer_info.get("email") or data.get("customer_email") or f"customer{customer_id}@retail.com"
+                region = customer_info.get("region") or data.get("customer_region") or "General"
 
-                if c_name:
-                    cur.execute(
-                        "INSERT INTO Customers (customer_id, c_name, email, region) VALUES (%s, %s, %s, %s)",
-                        (customer_id, c_name, email, region)
-                    )
-                    customer = (customer_id, c_name, email, region)
-                else:
-                    return jsonify({
-                        "success": False,
-                        "customer_not_found": True,
-                        "message": f"Customer ID #{customer_id} does not exist. Please provide customer name and region to register."
-                    }), 400
+                cur.execute(
+                    "INSERT INTO Customers (customer_id, c_name, email, region) VALUES (%s, %s, %s, %s)",
+                    (customer_id, c_name, email, region)
+                )
+                customer = (customer_id, c_name, email, region)
 
             bill_items = []
             total_bill_amount = 0
@@ -266,17 +620,20 @@ def pos_checkout():
             bill_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             for item in items:
-                pid = int(item.get("product_id"))
-                qty = int(item.get("quantity"))
+                pid = int(item.get("product_id") or item.get("id"))
+                qty = int(item.get("quantity") or item.get("qty") or 0)
 
                 if qty <= 0:
                     continue
 
-                cur.execute("SELECT p_name, category, price, stock_quantity, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing') FROM Products WHERE product_id = %s FOR UPDATE", (pid,))
+                cur.execute(
+                    "SELECT p_name, category, price, stock_quantity, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing') FROM Products WHERE product_id = %s FOR UPDATE",
+                    (pid,)
+                )
                 prod = cur.fetchone()
                 if not prod:
                     conn.rollback()
-                    return jsonify({"success": False, "message": f"Product #{pid} not found."}), 400
+                    return jsonify({"success": False, "message": f"Product #{pid} not found in catalog."}), 400
 
                 p_name, category, price, stock_qty, raw_unit, raw_subcat = prod
                 unit = get_product_unit(category, p_name, explicit_unit=raw_unit, subcategory=raw_subcat)
@@ -284,8 +641,8 @@ def pos_checkout():
                 if qty > stock_qty:
                     conn.rollback()
                     return jsonify({
-                        "success": False, 
-                        "message": f"Not enough stock for '{p_name}'. Available: {stock_qty} {unit}, Requested: {qty} {unit}"
+                        "success": False,
+                        "message": f"Insufficient stock for '{p_name}'. Available: {stock_qty} {unit}, Requested: {qty} {unit}."
                     }), 400
 
                 # Compute GST
@@ -306,6 +663,7 @@ def pos_checkout():
                 cur.execute("UPDATE Products SET stock_quantity = stock_quantity - %s WHERE product_id = %s", (qty, pid))
 
                 bill_items.append({
+                    "id": pid,
                     "product_id": pid,
                     "name": p_name,
                     "category": category,
@@ -313,13 +671,12 @@ def pos_checkout():
                     "unit": unit,
                     "price": price,
                     "quantity": qty,
-                    "quantity_display": f"{qty} {unit}",
+                    "qty": qty,
                     "subtotal": item_subtotal,
-                    "gst_rate": int(gst_rate * 100),
+                    "gstRate": int(gst_rate * 100),
+                    "gst": item_gst,
                     "gst_amount": item_gst,
-                    "cgst_amount": round(item_gst / 2.0, 2),
-                    "sgst_amount": round(item_gst / 2.0, 2),
-                    "final_amount": item_final
+                    "total": item_final
                 })
 
                 total_bill_amount += item_final
@@ -327,24 +684,34 @@ def pos_checkout():
 
             conn.commit()
 
+            bill_number = created_sale_ids[0] if created_sale_ids else int(datetime.datetime.now().timestamp())
+            invoice = {
+                "billNumber": bill_number,
+                "bill_no": bill_number,
+                "sale_ids": created_sale_ids,
+                "date": bill_date,
+                "bill_date": bill_date,
+                "customerId": customer[0],
+                "customerName": customer[1],
+                "customerRegion": customer[3],
+                "customer": {
+                    "id": customer[0],
+                    "name": customer[1],
+                    "email": customer[2],
+                    "region": customer[3]
+                },
+                "items": bill_items,
+                "subtotal": total_bill_amount - total_gst_amount,
+                "gstTotal": total_gst_amount,
+                "total_gst": total_gst_amount,
+                "grandTotal": total_bill_amount,
+                "total_amount": total_bill_amount
+            }
+
             return jsonify({
                 "success": True,
                 "message": "Sale transaction completed successfully.",
-                "invoice": {
-                    "bill_no": created_sale_ids[0] if created_sale_ids else "N/A",
-                    "sale_ids": created_sale_ids,
-                    "bill_date": bill_date,
-                    "customer": {
-                        "id": customer[0],
-                        "name": customer[1],
-                        "email": customer[2],
-                        "region": customer[3]
-                    },
-                    "items": bill_items,
-                    "total_amount": total_bill_amount,
-                    "total_gst": total_gst_amount,
-                    "subtotal": total_bill_amount - total_gst_amount
-                }
+                "invoice": invoice
             })
     except Exception as e:
         conn.rollback()
@@ -354,307 +721,72 @@ def pos_checkout():
 
 
 # -------------------------------------------------------------------------
-# Products & Inventory Management
+# Orders History Endpoint
 # -------------------------------------------------------------------------
-
-@app.route("/products")
-@login_required
-def products():
-    search = request.args.get("search", "").strip()
-    category = request.args.get("category", "").strip()
-    subcategory = request.args.get("subcategory", "").strip()
-
+@app.route("/api/orders", methods=["GET"])
+def api_get_orders():
+    limit = request.args.get("limit", default=100, type=int)
     conn = get_connection()
-    products_list = []
-    categories = []
-    subcategories = []
+    orders = []
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT category FROM Products WHERE category IS NOT NULL AND category != '' ORDER BY category")
-            categories = [r[0] for r in cur.fetchall()]
+            cur.execute("""
+                SELECT s.sales_id, s.product_id, p.p_name, p.category, p.price, 
+                       s.quantity, s.total_amount, s.gst_amount, s.Date,
+                       c.customer_id, c.c_name, c.region, COALESCE(p.unit, 'pcs')
+                FROM Sales s
+                LEFT JOIN Products p ON s.product_id = p.product_id
+                LEFT JOIN Customers c ON s.customer_id = c.customer_id
+                ORDER BY s.sales_id DESC
+                LIMIT %s
+            """, (limit,))
+            rows = cur.fetchall()
 
-            cur.execute("SELECT DISTINCT subcategory FROM Products WHERE subcategory IS NOT NULL AND subcategory != '' ORDER BY subcategory")
-            subcategories = [r[0] for r in cur.fetchall()]
-            if not subcategories:
-                subcategories = ["Packing", "Open"]
-
-            query = "SELECT product_id, p_name, category, price, stock_quantity, cost, COALESCE(unit, 'pcs') AS unit, COALESCE(subcategory, 'Packing') AS subcategory FROM Products WHERE 1=1"
-            params = []
-
-            if search:
-                query += " AND (p_name LIKE %s OR product_id LIKE %s)"
-                params.extend([f"%{search}%", f"%{search}%"])
-
-            if category:
-                query += " AND category = %s"
-                params.append(category)
-
-            if subcategory:
-                query += " AND subcategory = %s"
-                params.append(subcategory)
-
-            query += " ORDER BY product_id ASC"
-            cur.execute(query, params)
-            products_list = cur.fetchall()
-    finally:
-        conn.close()
-
-    return render_template(
-        "products.html", 
-        products=products_list, 
-        categories=categories, 
-        subcategories=subcategories,
-        search=search, 
-        selected_category=category,
-        selected_subcategory=subcategory
-    )
-
-
-@app.route("/products/add", methods=["POST"])
-@login_required
-@admin_required
-def product_add():
-    try:
-        pid = int(request.form.get("product_id"))
-        p_name = request.form.get("p_name", "").strip()
-        category = request.form.get("category", "").strip()
-        subcat_input = request.form.get("subcategory", "Packing").strip()
-        subcategory = normalize_subcategory(subcat_input)
-        unit_input = request.form.get("unit", "").strip()
-        unit = get_product_unit(category, p_name, explicit_unit=unit_input, subcategory=subcategory)
-        price = int(request.form.get("price"))
-        stock = int(request.form.get("stock_quantity"))
-        cost = int(request.form.get("cost"))
-
-        conn = get_connection()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO Products (product_id, p_name, category, subcategory, price, stock_quantity, cost, unit) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                    (pid, p_name, category, subcategory, price, stock, cost, unit)
-                )
-                conn.commit()
-                flash(f"Product '{p_name}' (#{pid}) added successfully: [{subcategory}] with unit '{unit}'.", "success")
-        except pymysql.err.IntegrityError:
-            conn.rollback()
-            flash(f"Product ID #{pid} already exists. Please choose a different ID.", "danger")
-        finally:
-            conn.close()
-    except Exception as e:
-        flash(f"Failed to add product: {e}", "danger")
-
-    return redirect(url_for("products"))
-
-
-@app.route("/products/update-price", methods=["POST"])
-@login_required
-@admin_required
-def product_update_price():
-    try:
-        pid = int(request.form.get("product_id"))
-        new_price = int(request.form.get("new_price"))
-
-        conn = get_connection()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("UPDATE Products SET price = %s WHERE product_id = %s", (new_price, pid))
-                conn.commit()
-                if cur.rowcount > 0:
-                    flash(f"Updated price for Product #{pid} to ₹{new_price}.", "success")
-                else:
-                    flash(f"Product #{pid} not found.", "warning")
-        finally:
-            conn.close()
-    except Exception as e:
-        flash(f"Failed to update price: {e}", "danger")
-
-    return redirect(url_for("products"))
-
-
-@app.route("/products/restock", methods=["POST"])
-@login_required
-@admin_required
-def product_restock():
-    try:
-        pid = int(request.form.get("product_id"))
-        added_stock = int(request.form.get("added_stock"))
-
-        if added_stock <= 0:
-            flash("Added stock must be greater than zero.", "warning")
-            return redirect(url_for("products"))
-
-        conn = get_connection()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT cost, p_name, category, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing') FROM Products WHERE product_id = %s", (pid,))
-                row = cur.fetchone()
-                if not row:
-                    flash(f"Product #{pid} not found.", "danger")
-                    return redirect(url_for("products"))
-
-                cost, p_name, cat, raw_unit, raw_subcat = row
-                unit = get_product_unit(cat, p_name, explicit_unit=raw_unit, subcategory=raw_subcat)
-                total_restock_cost = cost * added_stock
-
-                cur.execute("UPDATE Products SET stock_quantity = stock_quantity + %s WHERE product_id = %s", (added_stock, pid))
-                cur.execute(
-                    "INSERT INTO stock (product_id, Restock_date, Added_stock, total_cost) VALUES (%s, NOW(), %s, %s)",
-                    (pid, added_stock, total_restock_cost)
-                )
-                conn.commit()
-                flash(f"Restocked {added_stock} {unit} for '{p_name}' [{raw_subcat}]. Replenishment cost: ₹{total_restock_cost}.", "success")
-        finally:
-            conn.close()
-    except Exception as e:
-        flash(f"Failed to restock product: {e}", "danger")
-
-    return redirect(url_for("products"))
-
-
-# -------------------------------------------------------------------------
-# Customers Module
-# -------------------------------------------------------------------------
-
-@app.route("/customers")
-@login_required
-def customers():
-    search = request.args.get("search", "").strip()
-    conn = get_connection()
-    customers_list = []
-    try:
-        with conn.cursor() as cur:
-            query = "SELECT customer_id, c_name, email, region FROM Customers WHERE 1=1"
-            params = []
-            if search:
-                query += " AND (c_name LIKE %s OR email LIKE %s OR region LIKE %s OR customer_id LIKE %s)"
-                params.extend([f"%{search}%", f"%{search}%", f"%{search}%", f"%{search}%"])
-            query += " ORDER BY customer_id ASC"
-            cur.execute(query, params)
-            customers_list = cur.fetchall()
-    finally:
-        conn.close()
-
-    return render_template("customers.html", customers=customers_list, search=search)
-
-
-@app.route("/customers/add", methods=["POST"])
-@login_required
-def customer_add():
-    try:
-        cid = int(request.form.get("customer_id"))
-        c_name = request.form.get("c_name", "").strip()
-        email = request.form.get("email", "").strip()
-        region = request.form.get("region", "").strip()
-
-        if not c_name or not email or not region:
-            flash("All fields are required.", "danger")
-            return redirect(url_for("customers"))
-
-        conn = get_connection()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO Customers (customer_id, c_name, email, region) VALUES (%s, %s, %s, %s)",
-                    (cid, c_name, email, region)
-                )
-                conn.commit()
-                flash(f"Customer '{c_name}' (#{cid}) registered successfully.", "success")
-        except pymysql.err.IntegrityError:
-            conn.rollback()
-            flash("Customer with this ID or Email already exists.", "danger")
-        finally:
-            conn.close()
-    except Exception as e:
-        flash(f"Failed to add customer: {e}", "danger")
-
-    return redirect(url_for("customers"))
-
-
-@app.route("/api/customers/quick-add", methods=["POST"])
-@login_required
-def api_customer_quick_add():
-    data = request.get_json(silent=True) or request.form
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cid = data.get("customer_id")
-            if not cid:
-                cur.execute("SELECT COALESCE(MAX(customer_id), 100) + 1 FROM Customers")
-                cid = cur.fetchone()[0]
-            else:
-                cid = int(cid)
-
-            c_name = data.get("c_name", "").strip()
-            if not c_name:
-                return jsonify({"success": False, "message": "Customer name is required."}), 400
-
-            email = data.get("email", "").strip() or f"customer{cid}@retail.com"
-            region = data.get("region", "").strip() or "General"
-
-            cur.execute("SELECT customer_id FROM Customers WHERE customer_id = %s", (cid,))
-            if cur.fetchone():
-                return jsonify({"success": False, "message": f"Customer ID #{cid} already exists."}), 400
-
-            cur.execute(
-                "INSERT INTO Customers (customer_id, c_name, email, region) VALUES (%s, %s, %s, %s)",
-                (cid, c_name, email, region)
-            )
-            conn.commit()
-            return jsonify({
-                "success": True,
-                "message": f"Customer '{c_name}' registered successfully.",
-                "customer": {
-                    "id": cid,
-                    "name": c_name,
-                    "email": email,
-                    "region": region
-                }
-            })
-    except Exception as e:
-        conn.rollback()
-        return jsonify({"success": False, "message": f"Failed to add customer: {e}"}), 500
-    finally:
-        conn.close()
-
-
-@app.route("/api/customers/check/<int:customer_id>")
-@login_required
-def api_customer_check(customer_id):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT customer_id, c_name, email, region FROM Customers WHERE customer_id = %s", (customer_id,))
-            row = cur.fetchone()
-            if row:
-                return jsonify({
-                    "exists": True,
-                    "customer": {
-                        "id": row[0],
-                        "name": row[1],
-                        "email": row[2],
-                        "region": row[3]
-                    }
+            for r in rows:
+                sales_id, pid, p_name, category, price, qty, subtotal, gst, dt, cid, cname, region, unit = r
+                iso_date = dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+                total = (subtotal or 0) + (gst or 0)
+                orders.append({
+                    "billNumber": sales_id,
+                    "customerId": cid or 1,
+                    "customerName": cname or "Valued Customer",
+                    "customerRegion": region or "General",
+                    "date": iso_date,
+                    "items": [
+                        {
+                            "id": pid,
+                            "name": p_name or "Product",
+                            "category": category or "General",
+                            "price": price or 0,
+                            "qty": qty or 1,
+                            "unit": unit or "pcs",
+                            "subtotal": subtotal or 0,
+                            "gst": gst or 0,
+                            "total": total
+                        }
+                    ],
+                    "subtotal": subtotal or 0,
+                    "gstTotal": gst or 0,
+                    "grandTotal": total
                 })
-            return jsonify({"exists": False, "customer_id": customer_id})
     finally:
         conn.close()
 
+    return jsonify(orders)
+
 
 # -------------------------------------------------------------------------
-# Analytics & Reports (Admin)
+# Analytics & Reports Endpoint
 # -------------------------------------------------------------------------
-
-@app.route("/analytics")
-@login_required
-@admin_required
-def analytics():
+@app.route("/api/analytics", methods=["GET"])
+def api_analytics():
     current_year = datetime.datetime.now().year
     selected_year = request.args.get("year", type=int) or current_year
 
     conn = get_connection()
     data = {
         "year": selected_year,
-        "available_years": [],
+        "available_years": [current_year],
         "low_stock": [],
         "monthly_sales": [],
         "daily_sales": [],
@@ -667,134 +799,184 @@ def analytics():
 
     try:
         with conn.cursor() as cur:
-            # Available years in Sales
-            cur.execute("SELECT DISTINCT YEAR(Date) FROM Sales ORDER BY YEAR(Date) DESC")
+            # Available years
+            cur.execute("SELECT DISTINCT YEAR(Date) FROM Sales WHERE Date IS NOT NULL ORDER BY YEAR(Date) DESC")
             years_found = [r[0] for r in cur.fetchall() if r[0]]
-            data["available_years"] = years_found if years_found else [current_year]
+            if years_found:
+                data["available_years"] = years_found
 
-            # 1. Low stock
-            cur.execute("SELECT product_id, p_name, category, price, stock_quantity, COALESCE(unit, 'pcs') AS unit, COALESCE(subcategory, 'Packing') AS subcategory FROM Products WHERE stock_quantity < 5 ORDER BY stock_quantity ASC")
-            data["low_stock"] = cur.fetchall()
+            # Inventory Value
+            cur.execute("SELECT COALESCE(SUM(price * stock_quantity), 0) FROM Products")
+            data["inventory_value"] = int(cur.fetchone()[0])
+
+            # 1. Low stock products
+            cur.execute("""
+                SELECT product_id, p_name, category, price, stock_quantity, 
+                       COALESCE(unit, 'pcs') AS unit, COALESCE(subcategory, 'Packing') AS subcategory 
+                FROM Products 
+                WHERE stock_quantity < 5 
+                ORDER BY stock_quantity ASC
+            """)
+            data["low_stock"] = [
+                {
+                    "id": r[0],
+                    "name": r[1],
+                    "category": r[2],
+                    "price": r[3],
+                    "stock": r[4],
+                    "unit": r[5],
+                    "subcategory": r[6]
+                }
+                for r in cur.fetchall()
+            ]
 
             # 2. Monthly sales
             cur.execute("""
                 SELECT MONTH(s.Date) AS MonthNo, MONTHNAME(s.Date) AS Month, 
-                       SUM(s.total_amount) AS Revenue, 
-                       SUM(p.cost * s.quantity) AS Cost, 
-                       SUM(s.total_amount - (p.cost * s.quantity)) AS Profit 
+                       COALESCE(SUM(s.total_amount), 0) AS Revenue, 
+                       COALESCE(SUM(p.cost * s.quantity), 0) AS Cost, 
+                       COALESCE(SUM(s.total_amount - (p.cost * s.quantity)), 0) AS Profit,
+                       COALESCE(SUM(s.gst_amount), 0) AS Gst
                 FROM Sales s 
                 JOIN Products p ON s.product_id = p.product_id 
                 WHERE YEAR(s.Date) = %s 
                 GROUP BY MONTH(s.Date), MONTHNAME(s.Date) 
-                ORDER BY MonthNo
+                ORDER BY MonthNo ASC
             """, (selected_year,))
-            data["monthly_sales"] = cur.fetchall()
+            monthly = []
+            for r in cur.fetchall():
+                rev = float(r[2])
+                cst = float(r[3])
+                prf = float(r[4])
+                margin = round((prf / rev * 100), 1) if rev > 0 else 0
+                monthly.append({
+                    "monthNum": r[0],
+                    "name": r[1][:3] if r[1] else f"M{r[0]}",
+                    "revenue": rev,
+                    "cost": cst,
+                    "profit": prf,
+                    "margin": margin,
+                    "gst": float(r[5])
+                })
+            data["monthly_sales"] = monthly
 
-            # 3. Daily sales
+            # 3. Daily sales (last 15 days of records)
             cur.execute("""
                 SELECT CAST(s.Date AS DATE) AS SaleDate, 
-                       SUM(s.total_amount) AS Revenue, 
-                       SUM(p.cost * s.quantity) AS Cost, 
-                       SUM(s.total_amount - (p.cost * s.quantity)) AS Profit 
+                       COALESCE(SUM(s.total_amount), 0) AS Revenue, 
+                       COALESCE(SUM(p.cost * s.quantity), 0) AS Cost, 
+                       COALESCE(SUM(s.total_amount - (p.cost * s.quantity)), 0) AS Profit 
                 FROM Sales s 
                 JOIN Products p ON s.product_id = p.product_id 
                 GROUP BY CAST(s.Date AS DATE) 
                 ORDER BY SaleDate DESC LIMIT 15
             """)
-            data["daily_sales"] = cur.fetchall()
+            data["daily_sales"] = [
+                {
+                    "date": str(r[0]),
+                    "revenue": float(r[1]),
+                    "cost": float(r[2]),
+                    "profit": float(r[3])
+                }
+                for r in cur.fetchall()
+            ]
 
             # 4. Weekly sales
             cur.execute("""
                 SELECT WEEK(s.Date) AS WeekNo, 
-                       SUM(s.total_amount) AS Revenue, 
-                       SUM(p.cost * s.quantity) AS Cost, 
-                       SUM(s.total_amount - (p.cost * s.quantity)) AS Profit 
+                       COALESCE(SUM(s.total_amount), 0) AS Revenue, 
+                       COALESCE(SUM(p.cost * s.quantity), 0) AS Cost, 
+                       COALESCE(SUM(s.total_amount - (p.cost * s.quantity)), 0) AS Profit 
                 FROM Sales s 
                 JOIN Products p ON s.product_id = p.product_id 
                 WHERE YEAR(s.Date) = %s 
                 GROUP BY WEEK(s.Date) 
                 ORDER BY WeekNo ASC
             """, (selected_year,))
-            data["weekly_sales"] = cur.fetchall()
+            data["weekly_sales"] = [
+                {
+                    "week": r[0],
+                    "revenue": float(r[1]),
+                    "cost": float(r[2]),
+                    "profit": float(r[3])
+                }
+                for r in cur.fetchall()
+            ]
 
             # 5. Category sales
             cur.execute("""
                 SELECT p.category, 
-                       SUM(s.total_amount) AS Revenue, 
-                       SUM(p.cost * s.quantity) AS Cost, 
-                       SUM(s.total_amount - (p.cost * s.quantity)) AS Profit 
+                       COALESCE(SUM(s.total_amount), 0) AS Revenue, 
+                       COALESCE(SUM(p.cost * s.quantity), 0) AS Cost, 
+                       COALESCE(SUM(s.total_amount - (p.cost * s.quantity)), 0) AS Profit 
                 FROM Sales s 
                 JOIN Products p ON s.product_id = p.product_id 
                 GROUP BY p.category 
                 ORDER BY Revenue DESC
             """)
-            data["category_sales"] = cur.fetchall()
+            data["category_sales"] = [
+                {
+                    "category": r[0] or "General",
+                    "revenue": float(r[1]),
+                    "cost": float(r[2]),
+                    "profit": float(r[3])
+                }
+                for r in cur.fetchall()
+            ]
 
-            # 6. Product sales
+            # 6. Product sales (top 10 by revenue)
             cur.execute("""
                 SELECT p.p_name, 
-                       SUM(s.quantity) AS TotalQty, 
-                       SUM(s.total_amount) AS Revenue, 
-                       SUM(s.total_amount - (p.cost * s.quantity)) AS Profit,
+                       COALESCE(SUM(s.quantity), 0) AS TotalQty, 
+                       COALESCE(SUM(s.total_amount), 0) AS Revenue, 
+                       COALESCE(SUM(s.total_amount - (p.cost * s.quantity)), 0) AS Profit,
                        COALESCE(p.unit, 'pcs') AS unit
                 FROM Sales s 
                 JOIN Products p ON s.product_id = p.product_id 
                 GROUP BY p.p_name, p.unit 
                 ORDER BY Revenue DESC LIMIT 10
             """)
-            data["product_sales"] = cur.fetchall()
+            data["product_sales"] = [
+                {
+                    "name": r[0],
+                    "totalQty": r[1],
+                    "revenue": float(r[2]),
+                    "profit": float(r[3]),
+                    "unit": r[4]
+                }
+                for r in cur.fetchall()
+            ]
 
             # 7. Monthly GST
             cur.execute("""
-                SELECT MONTHNAME(Date) AS Month, SUM(gst_amount) AS TotalGst 
+                SELECT MONTHNAME(Date) AS Month, COALESCE(SUM(gst_amount), 0) AS TotalGst 
                 FROM Sales 
                 WHERE YEAR(Date) = %s 
                 GROUP BY MONTH(Date), MONTHNAME(Date) 
                 ORDER BY MONTH(Date) ASC
             """, (selected_year,))
-            data["monthly_gst"] = cur.fetchall()
-
-            # 8. Inventory Value
-            cur.execute("SELECT COALESCE(SUM(price * stock_quantity), 0) FROM Products")
-            data["inventory_value"] = cur.fetchone()[0]
+            data["monthly_gst"] = [
+                {
+                    "month": r[0],
+                    "totalGst": float(r[1])
+                }
+                for r in cur.fetchall()
+            ]
     finally:
         conn.close()
 
-    return render_template("analytics.html", data=data)
+    return jsonify(data)
 
 
 # -------------------------------------------------------------------------
-# Interactive Charts (Admin)
+# Chart Data Endpoint (Chart.js)
 # -------------------------------------------------------------------------
-
-@app.route("/charts")
-@login_required
-@admin_required
-def charts():
-    current_year = datetime.datetime.now().year
-    selected_year = request.args.get("year", type=int) or current_year
-
-    conn = get_connection()
-    available_years = [current_year]
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT YEAR(Date) FROM Sales ORDER BY YEAR(Date) DESC")
-            rows = [r[0] for r in cur.fetchall() if r[0]]
-            if rows:
-                available_years = rows
-    finally:
-        conn.close()
-
-    return render_template("charts.html", selected_year=selected_year, available_years=available_years)
-
-
-@app.route("/api/chart-data")
-@login_required
-@admin_required
+@app.route("/api/chart-data", methods=["GET"])
 def api_chart_data():
     year = request.args.get("year", type=int) or datetime.datetime.now().year
     conn = get_connection()
     result = {
+        "available_years": [datetime.datetime.now().year],
         "monthly": {"labels": [], "revenue": [], "cost": [], "profit": []},
         "category": {"labels": [], "revenue": []},
         "daily": {"labels": [], "sales": []},
@@ -802,6 +984,12 @@ def api_chart_data():
     }
     try:
         with conn.cursor() as cur:
+            # Available years
+            cur.execute("SELECT DISTINCT YEAR(Date) FROM Sales WHERE Date IS NOT NULL ORDER BY YEAR(Date) DESC")
+            years = [r[0] for r in cur.fetchall() if r[0]]
+            if years:
+                result["available_years"] = years
+
             # Monthly
             cur.execute("""
                 SELECT MONTHNAME(s.Date) AS Month, 
@@ -815,10 +1003,17 @@ def api_chart_data():
                 ORDER BY MONTH(s.Date) ASC
             """, (year,))
             for r in cur.fetchall():
-                result["monthly"]["labels"].append(r[0])
+                result["monthly"]["labels"].append(r[0][:3] if r[0] else "M")
                 result["monthly"]["revenue"].append(float(r[1]))
                 result["monthly"]["cost"].append(float(r[2]))
                 result["monthly"]["profit"].append(float(r[3]))
+
+            # Fallback for empty monthly data
+            if not result["monthly"]["labels"]:
+                result["monthly"]["labels"] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct"]
+                result["monthly"]["revenue"] = [0] * 10
+                result["monthly"]["cost"] = [0] * 10
+                result["monthly"]["profit"] = [0] * 10
 
             # Category
             cur.execute("""
@@ -829,8 +1024,9 @@ def api_chart_data():
                 ORDER BY Revenue DESC
             """)
             for r in cur.fetchall():
-                result["category"]["labels"].append(r[0])
-                result["category"]["revenue"].append(float(r[1]))
+                if r[0]:
+                    result["category"]["labels"].append(r[0])
+                    result["category"]["revenue"].append(float(r[1]))
 
             # Daily (recent 14 days)
             cur.execute("""
@@ -864,4 +1060,8 @@ def api_chart_data():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="127.0.0.1", port=5000)
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", "5000"))
+    debug = os.getenv("FLASK_ENV", "development") == "development"
+    print(f"Starting RetailSphere API on http://{host}:{port}")
+    app.run(host=host, port=port, debug=debug)
