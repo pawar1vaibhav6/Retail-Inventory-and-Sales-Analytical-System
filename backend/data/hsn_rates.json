@@ -1,0 +1,213 @@
+{
+  "hsns": {
+    "420222": {
+      "code": "420222",
+      "description": "Handbags with outer surface of plastic sheeting or textile materials",
+      "category": "Fashion",
+      "rate": 0.18,
+      "cgst_rate": 0.09,
+      "sgst_rate": 0.09,
+      "specificity_rank": 1
+    },
+    "84719000": {
+      "code": "84719000",
+      "description": "Other computer peripherals and automated data processing units",
+      "category": "Electronics",
+      "rate": 0.18,
+      "cgst_rate": 0.09,
+      "sgst_rate": 0.09,
+      "specificity_rank": 1
+    },
+    "33061020": {
+      "code": "33061020",
+      "description": "Dentifrices (Toothpaste), including menthol toothpaste and oral hygiene preparations",
+      "category": "Oral Hygiene",
+      "rate": 0.18,
+      "cgst_rate": 0.09,
+      "sgst_rate": 0.09,
+      "specificity_rank": 2,
+      "keywords": ["toothpaste", "menthol toothpaste", "dentifrice", "tooth paste"]
+    },
+    "33049900": {
+      "code": "33049900",
+      "description": "Other beauty or make-up preparations and preparations for the care of the skin (cosmetics)",
+      "category": "Cosmetics",
+      "rate": 0.18,
+      "cgst_rate": 0.09,
+      "sgst_rate": 0.09,
+      "specificity_rank": 1,
+      "keywords": ["cosmetics", "skin care", "beauty preparation"]
+    },
+    "07130000": {
+      "code": "07130000",
+      "description": "Dried leguminous vegetables, shelled, whether or not skinned or split (Pulses)",
+      "category": "Pulses",
+      "rate": 0.0,
+      "cgst_rate": 0.0,
+      "sgst_rate": 0.0,
+      "conditional": {
+        "staple": true,
+        "loose_rate": 0.0,
+        "packaged_branded_rate": 0.05
+      }
+    },
+    "10063000": {
+      "code": "10063000",
+      "description": "Semi-milled or wholly milled rice, whether or not polished or glazed (Grains/Rice)",
+      "category": "Cereals",
+      "rate": 0.0,
+      "cgst_rate": 0.0,
+      "sgst_rate": 0.0,
+      "conditional": {
+        "staple": true,
+        "loose_rate": 0.0,
+        "packaged_branded_rate": 0.05
+      }
+    },
+    "04012000": {
+      "code": "04012000",
+      "description": "Milk and cream, not concentrated nor containing added sugar",
+      "category": "Milk",
+      "rate": 0.0,
+      "cgst_rate": 0.0,
+      "sgst_rate": 0.0,
+      "conditional": {
+        "staple": true,
+        "loose_rate": 0.0,
+        "packaged_branded_rate": 0.05
+      }
+    },
+    "210390": {
+      "code": "210390",
+      "description": "Sauces and preparations therefor; mixed condiments and mixed seasonings (e.g. Hot Sauce)",
+      "category": "Package Food",
+      "rate": 0.12,
+      "cgst_rate": 0.06,
+      "sgst_rate": 0.06
+    },
+    "821599": {
+      "code": "821599",
+      "description": "Other spoons, forks, ladles, skimmers, cake-servers, fish-knives, butter-knives (Promo spoon / Cutlery)",
+      "category": "Cutlery",
+      "rate": 0.18,
+      "cgst_rate": 0.09,
+      "sgst_rate": 0.09
+    },
+    "180631": {
+      "code": "180631",
+      "description": "Chocolate and other food preparations containing cocoa, filled blocks, slabs or bars",
+      "category": "Confectionery",
+      "rate": 0.18,
+      "cgst_rate": 0.09,
+      "sgst_rate": 0.09
+    },
+    "200989": {
+      "code": "200989",
+      "description": "Fruit juice or vegetable juice (Canned juice)",
+      "category": "Beverages",
+      "rate": 0.12,
+      "cgst_rate": 0.06,
+      "sgst_rate": 0.06
+    },
+    "392410": {
+      "code": "392410",
+      "description": "Tableware and kitchenware of plastics (Plastic container)",
+      "category": "Accessories",
+      "rate": 0.18,
+      "cgst_rate": 0.09,
+      "sgst_rate": 0.09
+    },
+    "080131": {
+      "code": "080131",
+      "description": "Cashew nuts, fresh or dried, in shell",
+      "category": "Dry Fruits",
+      "rate": 0.05,
+      "cgst_rate": 0.025,
+      "sgst_rate": 0.025
+    },
+    "090210": {
+      "code": "090210",
+      "description": "Green tea (not fermented)",
+      "category": "tea",
+      "rate": 0.05,
+      "cgst_rate": 0.025,
+      "sgst_rate": 0.025
+    },
+    "090121": {
+      "code": "090121",
+      "description": "Coffee, roasted, not decaffeinated",
+      "category": "coffee",
+      "rate": 0.05,
+      "cgst_rate": 0.025,
+      "sgst_rate": 0.025
+    },
+    "151211": {
+      "code": "151211",
+      "description": "Sunflower seed or safflower oil and their fractions (Oil Products)",
+      "category": "Oil Products",
+      "rate": 0.05,
+      "cgst_rate": 0.025,
+      "sgst_rate": 0.025
+    },
+    "482010": {
+      "code": "482010",
+      "description": "Registers, account books, notebooks, order books, receipt books (Stationery)",
+      "category": "Stationery",
+      "rate": 0.12,
+      "cgst_rate": 0.06,
+      "sgst_rate": 0.06
+    },
+    "852872": {
+      "code": "852872",
+      "description": "Reception apparatus for television, colour (Electronics)",
+      "category": "Electronics",
+      "rate": 0.18,
+      "cgst_rate": 0.09,
+      "sgst_rate": 0.09
+    },
+    "940360": {
+      "code": "940360",
+      "description": "Other wooden furniture (Furniture)",
+      "category": "Furniture",
+      "rate": 0.18,
+      "cgst_rate": 0.09,
+      "sgst_rate": 0.09
+    },
+    "950669": {
+      "code": "950669",
+      "description": "Balls, other than golf balls and table-tennis balls (Sports)",
+      "category": "Sports",
+      "rate": 0.12,
+      "cgst_rate": 0.06,
+      "sgst_rate": 0.06
+    },
+    "070190": {
+      "code": "070190",
+      "description": "Fresh potatoes (Vegetables)",
+      "category": "Vegetables",
+      "rate": 0.0,
+      "cgst_rate": 0.0,
+      "sgst_rate": 0.0
+    },
+    "080810": {
+      "code": "080810",
+      "description": "Fresh apples (Fruits)",
+      "category": "Fruits",
+      "rate": 0.0,
+      "cgst_rate": 0.0,
+      "sgst_rate": 0.0
+    }
+  },
+  "gir_rules": {
+    "specific_over_general": [
+      {
+        "term": "toothpaste",
+        "description_keywords": ["toothpaste", "dentifrice", "tooth paste", "menthol toothpaste"],
+        "specific_hsn": "33061020",
+        "general_hsn": "33049900",
+        "rationale": "Dentifrices / Oral hygiene (Heading 3306) is more specific than general cosmetics (Heading 3304)."
+      }
+    ]
+  }
+}
+

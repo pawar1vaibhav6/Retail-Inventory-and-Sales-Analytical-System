@@ -20,6 +20,13 @@ if os.path.exists(env_path):
 
 import db
 from db import verify_user, register_user, get_connection, get_product_unit, normalize_subcategory
+from gst_classifier import (
+    classifier,
+    get_item_gst_details,
+    InvalidHSNError,
+    UnknownHSNError,
+    ClassificationError
+)
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "retailsphere-secure-secret-key-2026")
@@ -32,7 +39,7 @@ cors_origins_raw = os.getenv(
 cors_origins = [origin.strip() for origin in cors_origins_raw.split(",") if origin.strip()]
 CORS(app, origins=cors_origins, supports_credentials=True)
 
-# GST category definitions matching existing logic
+# GST category definitions matching existing logic (backward-compatible fallback)
 GST_RATES = {
     "0": ["Fruits", "Vegetables", "Milk", "Pulses", "Stationery", "Grocery", "Cereals"],
     "10": ["Package Food", "Oil Products", "Dry Fruits", "Spices", "tea", "coffee", "Beverages", "Sports", "PersonalCare"],
@@ -41,6 +48,10 @@ GST_RATES = {
 
 
 def get_gst_rate(category):
+    """
+    Backward-compatible helper returning (total_rate, cgst_rate, sgst_rate).
+    Preserves existing signature.
+    """
     for rate_str, cats in GST_RATES.items():
         if any(c.lower() == (category or "").lower() for c in cats):
             rate = float(rate_str) / 100.0
@@ -69,6 +80,41 @@ def health_check():
         "service": "RetailSphere Backend API",
         "timestamp": datetime.datetime.now().isoformat()
     })
+
+
+# -------------------------------------------------------------------------
+# GST Classification & Rates Endpoints
+# -------------------------------------------------------------------------
+@app.route("/api/gst/rates", methods=["GET"])
+def api_gst_rates():
+    """Retrieve full HSN -> GST rate registry."""
+    return jsonify({
+        "success": True,
+        "hsns": classifier._registry
+    })
+
+
+@app.route("/api/gst/classify", methods=["POST"])
+def api_gst_classify():
+    """Classify an item or bundle using GIR / branding rules and return tax breakdown."""
+    data = request.get_json(silent=True) or {}
+    try:
+        tax_info = get_item_gst_details(data)
+        return jsonify({
+            "success": True,
+            "tax_info": tax_info
+        })
+    except (InvalidHSNError, UnknownHSNError, ClassificationError, ValueError) as err:
+        return jsonify({
+            "success": False,
+            "error_type": err.__class__.__name__,
+            "message": str(err)
+        }), 400
+    except Exception as err:
+        return jsonify({
+            "success": False,
+            "message": f"Classification error: {err}"
+        }), 500
 
 
 # -------------------------------------------------------------------------
@@ -249,7 +295,11 @@ def api_get_products():
         with conn.cursor() as cur:
             query = """
                 SELECT product_id, p_name, category, price, stock_quantity, cost, 
-                       COALESCE(unit, 'pcs') AS unit, COALESCE(subcategory, 'Packing') AS subcategory 
+                       COALESCE(unit, 'pcs') AS unit, COALESCE(subcategory, 'Packing') AS subcategory,
+                       COALESCE(hsn_code, '') AS hsn_code,
+                       COALESCE(is_packaged, 1) AS is_packaged,
+                       COALESCE(is_branded, 1) AS is_branded,
+                       COALESCE(bundle_type, '') AS bundle_type
                 FROM Products WHERE 1=1
             """
             params = []
@@ -275,7 +325,12 @@ def api_get_products():
                     "stock": r[4],
                     "cost": r[5],
                     "unit": r[6],
-                    "subcategory": r[7]
+                    "subcategory": r[7],
+                    "hsn_code": r[8] if len(r) > 8 and r[8] else None,
+                    "hsn": r[8] if len(r) > 8 and r[8] else None,
+                    "is_packaged": bool(r[9]) if len(r) > 9 else True,
+                    "is_branded": bool(r[10]) if len(r) > 10 else True,
+                    "bundle_type": r[11] if len(r) > 11 and r[11] else None
                 })
     finally:
         conn.close()
@@ -312,10 +367,22 @@ def api_add_product():
                 stock = int(float(data.get("stock") or data.get("stock_quantity") or 0))
                 cost = int(float(data.get("cost") or 0))
 
-                cur.execute(
-                    "INSERT INTO Products (product_id, p_name, category, subcategory, price, stock_quantity, cost, unit) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                    (pid, p_name, category, subcategory, price, stock, cost, unit)
-                )
+                # HSN and branding attributes
+                hsn_input = data.get("hsn_code") or data.get("hsn")
+                hsn_code = classifier.validate_hsn_format(hsn_input) if hsn_input else None
+                is_packaged = 0 if str(data.get("is_packaged", "")).lower() in ("0", "false") else 1
+                is_branded = 0 if str(data.get("is_branded", "")).lower() in ("0", "false") else 1
+                bundle_type = data.get("bundle_type") or None
+
+                cur.execute("""
+                    INSERT INTO Products (
+                        product_id, p_name, category, subcategory, price, stock_quantity, cost, unit,
+                        hsn_code, is_packaged, is_branded, bundle_type
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    pid, p_name, category, subcategory, price, stock, cost, unit,
+                    hsn_code, is_packaged, is_branded, bundle_type
+                ))
                 conn.commit()
 
                 product = {
@@ -326,13 +393,21 @@ def api_add_product():
                     "price": price,
                     "stock": stock,
                     "cost": cost,
-                    "unit": unit
+                    "unit": unit,
+                    "hsn_code": hsn_code,
+                    "hsn": hsn_code,
+                    "is_packaged": bool(is_packaged),
+                    "is_branded": bool(is_branded),
+                    "bundle_type": bundle_type
                 }
                 return jsonify({
                     "success": True,
                     "message": f"Product '{p_name}' (#{pid}) added successfully.",
                     "product": product
                 }), 201
+        except InvalidHSNError as hsn_err:
+            conn.rollback()
+            return jsonify({"success": False, "message": str(hsn_err)}), 400
         except pymysql.err.IntegrityError:
             conn.rollback()
             return jsonify({"success": False, "message": f"Product ID #{pid} already exists."}), 400
@@ -424,14 +499,12 @@ def api_delete_product(pid):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            # First check if exists
             cur.execute("SELECT p_name FROM Products WHERE product_id = %s", (pid,))
             row = cur.fetchone()
             if not row:
                 return jsonify({"success": False, "message": f"Product #{pid} not found."}), 404
 
             p_name = row[0]
-            # Safely handle references in stock or sales if foreign keys exist
             cur.execute("DELETE FROM stock WHERE product_id = %s", (pid,))
             cur.execute("DELETE FROM Products WHERE product_id = %s", (pid,))
             conn.commit()
@@ -584,7 +657,7 @@ def api_get_customer_by_id(cid):
 
 
 # -------------------------------------------------------------------------
-# POS / Checkout Endpoint
+# POS / Checkout Endpoint with HSN & GST Integration
 # -------------------------------------------------------------------------
 @app.route("/api/pos/checkout", methods=["POST"])
 def api_pos_checkout():
@@ -626,16 +699,22 @@ def api_pos_checkout():
                 if qty <= 0:
                     continue
 
-                cur.execute(
-                    "SELECT p_name, category, price, stock_quantity, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing') FROM Products WHERE product_id = %s FOR UPDATE",
-                    (pid,)
-                )
+                cur.execute("""
+                    SELECT p_name, category, price, stock_quantity, 
+                           COALESCE(unit, 'pcs') AS unit, 
+                           COALESCE(subcategory, 'Packing') AS subcategory,
+                           COALESCE(hsn_code, '') AS hsn_code,
+                           COALESCE(is_packaged, 1) AS is_packaged,
+                           COALESCE(is_branded, 1) AS is_branded,
+                           COALESCE(bundle_type, '') AS bundle_type
+                    FROM Products WHERE product_id = %s FOR UPDATE
+                """, (pid,))
                 prod = cur.fetchone()
                 if not prod:
                     conn.rollback()
                     return jsonify({"success": False, "message": f"Product #{pid} not found in catalog."}), 400
 
-                p_name, category, price, stock_qty, raw_unit, raw_subcat = prod
+                p_name, category, price, stock_qty, raw_unit, raw_subcat, raw_hsn, raw_pkg, raw_brd, raw_bundle = prod
                 unit = get_product_unit(category, p_name, explicit_unit=raw_unit, subcategory=raw_subcat)
 
                 if qty > stock_qty:
@@ -645,8 +724,36 @@ def api_pos_checkout():
                         "message": f"Insufficient stock for '{p_name}'. Available: {stock_qty} {unit}, Requested: {qty} {unit}."
                     }), 400
 
-                # Compute GST
-                gst_rate, cgst_rate, sgst_rate = get_gst_rate(category)
+                # Compute GST from HSN Code / GIR Classification
+                raw_is_open = str(raw_subcat).strip().lower() in ("open", "loose")
+                is_pkg = False if raw_is_open else bool(raw_pkg)
+                is_brd = False if raw_is_open else bool(raw_brd)
+
+                explicit_item_hsn = item.get("hsn_code") or item.get("hsn") or (raw_hsn if raw_hsn else None)
+                item_bundle = item.get("bundle_type") or (raw_bundle if raw_bundle else None)
+
+                try:
+                    tax_info = get_item_gst_details({
+                        "id": pid,
+                        "name": p_name,
+                        "p_name": p_name,
+                        "category": category,
+                        "subcategory": raw_subcat,
+                        "hsn_code": explicit_item_hsn,
+                        "is_packaged": is_pkg,
+                        "is_branded": is_brd,
+                        "bundle_type": item_bundle,
+                        "bundle_items": item.get("bundle_items")
+                    })
+                    gst_rate = tax_info["gst_rate"]
+                    cgst_rate = tax_info["cgst_rate"]
+                    sgst_rate = tax_info["sgst_rate"]
+                    hsn_code = tax_info.get("hsn_code", "9988")
+                except Exception:
+                    # Fallback to category rate if unknown or missing HSN
+                    gst_rate, cgst_rate, sgst_rate = get_gst_rate(category)
+                    hsn_code = explicit_item_hsn or "9988"
+
                 item_subtotal = price * qty
                 item_gst = int(item_subtotal * gst_rate)
                 item_final = item_subtotal + item_gst
@@ -666,6 +773,8 @@ def api_pos_checkout():
                     "id": pid,
                     "product_id": pid,
                     "name": p_name,
+                    "hsn_code": hsn_code,
+                    "hsn": hsn_code,
                     "category": category,
                     "subcategory": raw_subcat,
                     "unit": unit,
@@ -673,9 +782,11 @@ def api_pos_checkout():
                     "quantity": qty,
                     "qty": qty,
                     "subtotal": item_subtotal,
-                    "gstRate": int(gst_rate * 100),
+                    "gstRate": int(round(gst_rate * 100)),
                     "gst": item_gst,
                     "gst_amount": item_gst,
+                    "cgst_amount": round(item_gst / 2.0, 2),
+                    "sgst_amount": round(item_gst / 2.0, 2),
                     "total": item_final
                 })
 
@@ -733,7 +844,8 @@ def api_get_orders():
             cur.execute("""
                 SELECT s.sales_id, s.product_id, p.p_name, p.category, p.price, 
                        s.quantity, s.total_amount, s.gst_amount, s.Date,
-                       c.customer_id, c.c_name, c.region, COALESCE(p.unit, 'pcs')
+                       c.customer_id, c.c_name, c.region, COALESCE(p.unit, 'pcs'),
+                       COALESCE(p.hsn_code, '')
                 FROM Sales s
                 LEFT JOIN Products p ON s.product_id = p.product_id
                 LEFT JOIN Customers c ON s.customer_id = c.customer_id
@@ -743,7 +855,7 @@ def api_get_orders():
             rows = cur.fetchall()
 
             for r in rows:
-                sales_id, pid, p_name, category, price, qty, subtotal, gst, dt, cid, cname, region, unit = r
+                sales_id, pid, p_name, category, price, qty, subtotal, gst, dt, cid, cname, region, unit, hsn = r
                 iso_date = dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
                 total = (subtotal or 0) + (gst or 0)
                 orders.append({
@@ -756,6 +868,8 @@ def api_get_orders():
                         {
                             "id": pid,
                             "name": p_name or "Product",
+                            "hsn_code": hsn or None,
+                            "hsn": hsn or None,
                             "category": category or "General",
                             "price": price or 0,
                             "qty": qty or 1,
@@ -799,20 +913,18 @@ def api_analytics():
 
     try:
         with conn.cursor() as cur:
-            # Available years
             cur.execute("SELECT DISTINCT YEAR(Date) FROM Sales WHERE Date IS NOT NULL ORDER BY YEAR(Date) DESC")
             years_found = [r[0] for r in cur.fetchall() if r[0]]
             if years_found:
                 data["available_years"] = years_found
 
-            # Inventory Value
             cur.execute("SELECT COALESCE(SUM(price * stock_quantity), 0) FROM Products")
             data["inventory_value"] = int(cur.fetchone()[0])
 
-            # 1. Low stock products
             cur.execute("""
                 SELECT product_id, p_name, category, price, stock_quantity, 
-                       COALESCE(unit, 'pcs') AS unit, COALESCE(subcategory, 'Packing') AS subcategory 
+                       COALESCE(unit, 'pcs') AS unit, COALESCE(subcategory, 'Packing') AS subcategory,
+                       COALESCE(hsn_code, '') AS hsn_code
                 FROM Products 
                 WHERE stock_quantity < 5 
                 ORDER BY stock_quantity ASC
@@ -825,12 +937,12 @@ def api_analytics():
                     "price": r[3],
                     "stock": r[4],
                     "unit": r[5],
-                    "subcategory": r[6]
+                    "subcategory": r[6],
+                    "hsn_code": r[7] if r[7] else None
                 }
                 for r in cur.fetchall()
             ]
 
-            # 2. Monthly sales
             cur.execute("""
                 SELECT MONTH(s.Date) AS MonthNo, MONTHNAME(s.Date) AS Month, 
                        COALESCE(SUM(s.total_amount), 0) AS Revenue, 
@@ -860,7 +972,6 @@ def api_analytics():
                 })
             data["monthly_sales"] = monthly
 
-            # 3. Daily sales (last 15 days of records)
             cur.execute("""
                 SELECT CAST(s.Date AS DATE) AS SaleDate, 
                        COALESCE(SUM(s.total_amount), 0) AS Revenue, 
@@ -881,7 +992,6 @@ def api_analytics():
                 for r in cur.fetchall()
             ]
 
-            # 4. Weekly sales
             cur.execute("""
                 SELECT WEEK(s.Date) AS WeekNo, 
                        COALESCE(SUM(s.total_amount), 0) AS Revenue, 
@@ -903,7 +1013,6 @@ def api_analytics():
                 for r in cur.fetchall()
             ]
 
-            # 5. Category sales
             cur.execute("""
                 SELECT p.category, 
                        COALESCE(SUM(s.total_amount), 0) AS Revenue, 
@@ -924,7 +1033,6 @@ def api_analytics():
                 for r in cur.fetchall()
             ]
 
-            # 6. Product sales (top 10 by revenue)
             cur.execute("""
                 SELECT p.p_name, 
                        COALESCE(SUM(s.quantity), 0) AS TotalQty, 
@@ -947,7 +1055,6 @@ def api_analytics():
                 for r in cur.fetchall()
             ]
 
-            # 7. Monthly GST
             cur.execute("""
                 SELECT MONTHNAME(Date) AS Month, COALESCE(SUM(gst_amount), 0) AS TotalGst 
                 FROM Sales 
@@ -984,13 +1091,11 @@ def api_chart_data():
     }
     try:
         with conn.cursor() as cur:
-            # Available years
             cur.execute("SELECT DISTINCT YEAR(Date) FROM Sales WHERE Date IS NOT NULL ORDER BY YEAR(Date) DESC")
             years = [r[0] for r in cur.fetchall() if r[0]]
             if years:
                 result["available_years"] = years
 
-            # Monthly
             cur.execute("""
                 SELECT MONTHNAME(s.Date) AS Month, 
                        COALESCE(SUM(s.total_amount), 0) AS Revenue, 
@@ -1008,14 +1113,12 @@ def api_chart_data():
                 result["monthly"]["cost"].append(float(r[2]))
                 result["monthly"]["profit"].append(float(r[3]))
 
-            # Fallback for empty monthly data
             if not result["monthly"]["labels"]:
                 result["monthly"]["labels"] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct"]
                 result["monthly"]["revenue"] = [0] * 10
                 result["monthly"]["cost"] = [0] * 10
                 result["monthly"]["profit"] = [0] * 10
 
-            # Category
             cur.execute("""
                 SELECT p.category, COALESCE(SUM(s.total_amount), 0) AS Revenue 
                 FROM Sales s 
@@ -1028,7 +1131,6 @@ def api_chart_data():
                     result["category"]["labels"].append(r[0])
                     result["category"]["revenue"].append(float(r[1]))
 
-            # Daily (recent 14 days)
             cur.execute("""
                 SELECT DATE_FORMAT(Date, '%d-%b') AS DayStr, 
                        COALESCE(SUM(total_amount), 0) AS Revenue 
@@ -1041,7 +1143,6 @@ def api_chart_data():
                 result["daily"]["labels"].append(r[0])
                 result["daily"]["sales"].append(float(r[1]))
 
-            # Weekly
             cur.execute("""
                 SELECT CONCAT('Week ', WEEK(Date)) AS Wk, 
                        COALESCE(SUM(total_amount), 0) AS Revenue 

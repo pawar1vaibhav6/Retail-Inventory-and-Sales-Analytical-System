@@ -1,5 +1,9 @@
 import pandas as pd
 from db import conn, cursor, get_product_unit
+try:
+    from gst_classifier import get_item_gst_details
+except ImportError:
+    get_item_gst_details = None
 
 
 def sale(customer_id, total_amount, bill_items):
@@ -8,35 +12,78 @@ def sale(customer_id, total_amount, bill_items):
     gst_5 = ["Package Food", "Oil Products", "Dry Fruits", "Spices", "tea", "coffee", "Sports", "PersonalCare", "Personal Care", "Snacks", "Beverages", "Home Care"]
     gst_18 = ["Electronics", "Furniture", "Fashion", "Accessories"]
 
-    q = "SELECT stock_quantity, price, category, p_name, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing') FROM Products WHERE product_id = %s"
-    cursor.execute(q, (product_id,))
-    row = cursor.fetchone()
-    if not row:
-        print("Product not found")
-        return total_amount, None, None, None
+    # Retrieve product info including HSN and classification fields if available
+    try:
+        q = """SELECT stock_quantity, price, category, p_name, 
+                      COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing'),
+                      COALESCE(hsn_code, ''), COALESCE(is_packaged, 1), 
+                      COALESCE(is_branded, 1), COALESCE(bundle_type, '') 
+               FROM Products WHERE product_id = %s"""
+        cursor.execute(q, (product_id,))
+        row = cursor.fetchone()
+        if not row:
+            print("Product not found")
+            return total_amount, None, None, None
+        stock, price, cat, p_name, raw_unit, raw_subcat, hsn_code, is_packaged, is_branded, bundle_type = row
+    except Exception:
+        # Fallback query if HSN columns don't exist yet
+        q_legacy = "SELECT stock_quantity, price, category, p_name, COALESCE(unit, 'pcs'), COALESCE(subcategory, 'Packing') FROM Products WHERE product_id = %s"
+        cursor.execute(q_legacy, (product_id,))
+        row = cursor.fetchone()
+        if not row:
+            print("Product not found")
+            return total_amount, None, None, None
+        stock, price, cat, p_name, raw_unit, raw_subcat = row
+        hsn_code, is_packaged, is_branded, bundle_type = "", 1, 1, ""
 
-    stock, price, cat, p_name, raw_unit, raw_subcat = row
     unit = get_product_unit(cat, p_name, explicit_unit=raw_unit, subcategory=raw_subcat)
 
     quantity = int(input(f"Quantity (in {unit}) [{raw_subcat}]:"))
     amount = quantity * price
 
-    if cat in gst_0:
-        cgst = 0
-        sgst = 0
-        gst = 0
-    elif cat in gst_5:
-        cgst = 0.05
-        sgst = 0.05
-        gst = 0.1
-    elif cat in gst_18:
-        cgst = 0.09
-        sgst = 0.09
-        gst = 0.18
-    else:
-        cgst = 0
-        sgst = 0
-        gst = 0
+    # GST calculation: prefer HSN / GIR classification engine; fallback to category
+    hsn_display = hsn_code if hsn_code else "N/A"
+    gst = 0
+    cgst = 0
+    sgst = 0
+
+    if get_item_gst_details:
+        try:
+            raw_is_open = str(raw_subcat).strip().lower() in ("open", "loose")
+            tax_info = get_item_gst_details({
+                "id": product_id,
+                "name": p_name,
+                "category": cat,
+                "subcategory": raw_subcat,
+                "hsn_code": hsn_code if hsn_code else None,
+                "is_packaged": False if raw_is_open else bool(is_packaged),
+                "is_branded": False if raw_is_open else bool(is_branded),
+                "bundle_type": bundle_type if bundle_type else None
+            })
+            gst = tax_info["gst_rate"]
+            cgst = tax_info["cgst_rate"]
+            sgst = tax_info["sgst_rate"]
+            hsn_display = tax_info.get("hsn_code", hsn_code or "N/A")
+        except Exception:
+            gst = None
+
+    if gst is None:
+        if cat in gst_0:
+            cgst = 0
+            sgst = 0
+            gst = 0
+        elif cat in gst_5:
+            cgst = 0.05
+            sgst = 0.05
+            gst = 0.1
+        elif cat in gst_18:
+            cgst = 0.09
+            sgst = 0.09
+            gst = 0.18
+        else:
+            cgst = 0
+            sgst = 0
+            gst = 0
 
     if quantity > stock:
         print(f"Not Enough Stock. Available warehouse stock: {stock} {unit}")
@@ -68,12 +115,13 @@ def sale(customer_id, total_amount, bill_items):
             bill_items.append({
                 "Product Id": product_id,
                 "Product": row[1],
+                "HSN": hsn_display,
                 "Type": raw_subcat,
                 "Price": f"Rs. {row[2]}/{unit}",
                 "Quantity": f"{quantity} {unit}",
                 "Total": row[3],
                 "CGST": cgst,
-                "SGSt": sgst,
+                "SGST": sgst,
                 "GST_Total": row[3] * gst,
                 "Final Amount": row[3] + row[3] * gst
             })

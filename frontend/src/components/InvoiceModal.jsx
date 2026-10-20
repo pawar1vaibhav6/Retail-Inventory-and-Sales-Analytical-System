@@ -49,6 +49,7 @@ export default function InvoiceModal({ order, onClose }) {
               <tr>
                 <th>#</th>
                 <th>Product</th>
+                <th>HSN</th>
                 <th>Category</th>
                 <th>Price</th>
                 <th>Qty</th>
@@ -62,6 +63,7 @@ export default function InvoiceModal({ order, onClose }) {
                 <tr key={idx}>
                   <td>{idx + 1}</td>
                   <td><strong>{item.name}</strong></td>
+                  <td><span className="code-pill">{item.hsn_code || item.hsn || 'N/A'}</span></td>
                   <td>{item.category}</td>
                   <td>₹{Number(item.price).toFixed(2)}</td>
                   <td>{item.qty} {item.unit || 'pcs'}</td>
@@ -73,15 +75,15 @@ export default function InvoiceModal({ order, onClose }) {
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan="5" className="text-right font-bold">Subtotal:</td>
+                <td colSpan="6" className="text-right font-bold">Subtotal:</td>
                 <td colSpan="3" className="font-bold">₹{Number(order.subtotal).toFixed(2)}</td>
               </tr>
               <tr>
-                <td colSpan="5" className="text-right font-bold">GST Amount:</td>
+                <td colSpan="6" className="text-right font-bold">GST Amount:</td>
                 <td colSpan="3" className="font-bold">₹{Number(order.gstTotal).toFixed(2)}</td>
               </tr>
               <tr className="inv-grand-total-row">
-                <td colSpan="5" className="text-right font-bold">Grand Total:</td>
+                <td colSpan="6" className="text-right font-bold">Grand Total:</td>
                 <td colSpan="3" className="font-bold text-success">
                   ₹{Number(order.grandTotal).toFixed(2)}
                 </td>
@@ -106,4 +108,3 @@ export default function InvoiceModal({ order, onClose }) {
     </div>
   );
 }
-

@@ -157,6 +157,38 @@ def init_db():
             if cur.fetchone()[0] == 0:
                 cur.execute("ALTER TABLE Products ADD COLUMN subcategory VARCHAR(50) DEFAULT 'Packing'")
 
+            # Ensure hsn_code column exists for GST compliance
+            cur.execute("""
+                SELECT COUNT(*) FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'Products' AND COLUMN_NAME = 'hsn_code'
+            """, (DB_NAME,))
+            if cur.fetchone()[0] == 0:
+                cur.execute("ALTER TABLE Products ADD COLUMN hsn_code VARCHAR(10) DEFAULT NULL")
+
+            # Ensure is_packaged column exists for loose vs packaged staples rule
+            cur.execute("""
+                SELECT COUNT(*) FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'Products' AND COLUMN_NAME = 'is_packaged'
+            """, (DB_NAME,))
+            if cur.fetchone()[0] == 0:
+                cur.execute("ALTER TABLE Products ADD COLUMN is_packaged TINYINT(1) DEFAULT 1")
+
+            # Ensure is_branded column exists for brand status rule
+            cur.execute("""
+                SELECT COUNT(*) FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'Products' AND COLUMN_NAME = 'is_branded'
+            """, (DB_NAME,))
+            if cur.fetchone()[0] == 0:
+                cur.execute("ALTER TABLE Products ADD COLUMN is_branded TINYINT(1) DEFAULT 1")
+
+            # Ensure bundle_type column exists for composite/mixed supply
+            cur.execute("""
+                SELECT COUNT(*) FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'Products' AND COLUMN_NAME = 'bundle_type'
+            """, (DB_NAME,))
+            if cur.fetchone()[0] == 0:
+                cur.execute("ALTER TABLE Products ADD COLUMN bundle_type VARCHAR(20) DEFAULT NULL")
+
             # Customers table
             cur.execute("""
             CREATE TABLE IF NOT EXISTS Customers (
