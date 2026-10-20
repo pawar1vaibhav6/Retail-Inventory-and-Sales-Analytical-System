@@ -260,3 +260,4 @@ export default function ProductModal({ isOpen, mode, product, categories, onClos
     </div>
   );
 }
+

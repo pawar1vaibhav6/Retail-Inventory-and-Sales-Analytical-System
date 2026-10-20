@@ -86,3 +86,4 @@ export default function CustomerModal({ isOpen, onClose, onSave }) {
     </div>
   );
 }
+
