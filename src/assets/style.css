@@ -201,36 +201,8 @@ body,
 }
 
 /* ==========================================================================
-   Navbar
+   Brand & Logo
    ========================================================================== */
-
-.navbar {
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    padding: 0.75rem 2rem;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    box-shadow: var(--shadow-sm);
-}
-
-.nav-container {
-    max-width: 1300px;
-    margin: 0 auto;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1.5rem;
-}
-
-.nav-brand {
-    display: flex;
-    align-items: center;
-    gap: 0.85rem;
-    text-decoration: none;
-    color: var(--text);
-    flex-shrink: 0;
-}
 
 .brand-icon {
     width: 40px;
@@ -271,68 +243,6 @@ body,
     font-size: 0.72rem;
     color: var(--text-muted);
     font-weight: 500;
-}
-
-/* Nav Menu Links */
-.nav-menu {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    flex-wrap: wrap;
-}
-
-.nav-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    padding: 0.45rem 0.85rem;
-    border-radius: var(--radius-md);
-    font-size: 0.88rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-decoration: none;
-}
-
-.nav-item:hover {
-    color: var(--text);
-    background: var(--hover);
-}
-
-.nav-item.active {
-    color: var(--accent-contrast);
-    background: var(--accent);
-}
-
-[data-theme="dark"] .nav-item.active {
-    background: var(--ember-8);
-    color: #0b0f17;
-}
-
-.nav-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.85rem;
-    flex-shrink: 0;
-}
-
-.nav-link {
-    text-decoration: none;
-    color: var(--text-muted);
-    font-weight: 600;
-    font-size: 0.9rem;
-}
-
-.nav-link:hover { color: var(--text); }
-
-.user-pill {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    background: var(--surface-header);
-    padding: 0.3rem 0.85rem;
-    border-radius: var(--radius-full);
-    border: 1px solid var(--border);
-    color: var(--text);
 }
 
 .user-name {
