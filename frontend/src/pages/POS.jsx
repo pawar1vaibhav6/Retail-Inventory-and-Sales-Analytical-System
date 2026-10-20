@@ -1,8 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useStore, getGstRate } from '../context/StoreContext';
 import CustomerModal from '../components/CustomerModal';
 import InvoiceModal from '../components/InvoiceModal';
+import SearchSelect from '../components/SearchSelect';
+
+/* Small coloured stock pill used inside the product dropdown */
+function StockPill({ stock, unit }) {
+  const out = stock <= 0;
+  const low = stock > 0 && stock < 5;
+  const color = out ? '#dc2626' : low ? '#d97706' : '#059669';
+  const bg = out ? 'rgba(220,38,38,0.12)' : low ? 'rgba(217,119,6,0.14)' : 'rgba(5,150,105,0.12)';
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '2px 8px',
+        borderRadius: 999,
+        fontSize: 11,
+        fontWeight: 700,
+        color,
+        background: bg,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {out ? 'Out of stock' : `${stock} ${unit}`}
+    </span>
+  );
+}
 
 export default function POS() {
   const { products, customers, addCustomer, recordSale } = useStore();
@@ -18,13 +43,37 @@ export default function POS() {
   const selectedCustomer = customers.find((c) => String(c.id) === String(selectedCustomerId));
   const selectedProduct = products.find((p) => String(p.id) === String(selectedProductId));
 
-  const handleCustomerSelect = (val) => {
-    if (val === '__NEW__') {
-      setIsCustomerModalOpen(true);
-    } else {
-      setSelectedCustomerId(val);
-    }
-  };
+  /* ---------- Dropdown options (searchable) ---------- */
+  const customerOptions = useMemo(
+    () =>
+      customers.map((c) => ({
+        value: String(c.id),
+        label: `#${c.id} - ${c.name}`,
+        sublabel: `${c.region} • ${c.email}`,
+        searchText: `${c.id} ${c.name} ${c.region} ${c.email}`,
+      })),
+    [customers]
+  );
+
+  const productOptions = useMemo(
+    () =>
+      products.map((p) => ({
+        value: String(p.id),
+        label: p.name,
+        sublabel: `#${p.id} • ${p.category} | ${p.subcategory}`,
+        searchText: `${p.id} ${p.name} ${p.category} ${p.subcategory}`,
+        disabled: p.stock <= 0,
+        right: (
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>
+              ₹{p.price}/{p.unit}
+            </div>
+            <StockPill stock={p.stock} unit={p.unit} />
+          </div>
+        ),
+      })),
+    [products]
+  );
 
   const handleCustomerCreated = (newCust) => {
     setIsCustomerModalOpen(false);
@@ -109,6 +158,10 @@ export default function POS() {
       type: 'success',
       message: `Added ${qty} ${selectedProduct.unit} of "${selectedProduct.name}" to cart.`
     });
+
+    // Ready for the next item
+    setSelectedProductId('');
+    setQuantity(1);
   };
 
   const handleUpdateQty = (index, delta) => {
@@ -205,13 +258,28 @@ export default function POS() {
 
       {feedback && (
         <div className={`alert alert-${feedback.type} mb-3`}>
-          <div className="alert-content">
+          <div className="alert-content" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <i
               className={`fa-solid ${
                 feedback.type === 'success' ? 'fa-circle-check' : 'fa-circle-exclamation'
               }`}
             />
-            <span>{feedback.message}</span>
+            <span style={{ flex: 1 }}>{feedback.message}</span>
+            <button
+              type="button"
+              aria-label="Dismiss message"
+              onClick={() => setFeedback(null)}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: 'inherit',
+                opacity: 0.7,
+                cursor: 'pointer',
+                fontSize: 14,
+              }}
+            >
+              <i className="fa-solid fa-xmark" />
+            </button>
           </div>
         </div>
       )}
@@ -238,30 +306,73 @@ export default function POS() {
             <div className="card-body">
               <div className="form-group mb-2">
                 <label htmlFor="posCustomerSelect">Customer Account</label>
-                <select
+                <SearchSelect
                   id="posCustomerSelect"
-                  className="form-control"
+                  icon="fa-user"
+                  options={customerOptions}
                   value={selectedCustomerId}
-                  onChange={(e) => handleCustomerSelect(e.target.value)}
-                >
-                  <option value="">-- Choose Existing Customer --</option>
-                  <option value="__NEW__" className="text-primary font-bold">
-                    + Register New Customer...
-                  </option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      #{c.id} - {c.name} ({c.region})
-                    </option>
-                  ))}
-                </select>
+                  onChange={setSelectedCustomerId}
+                  placeholder="Search by name, ID, region or email..."
+                  emptyText="No matching customer"
+                  footerAction={{
+                    label: 'Register New Customer',
+                    icon: 'fa-user-plus',
+                    onClick: () => setIsCustomerModalOpen(true),
+                  }}
+                />
               </div>
 
               {selectedCustomer && (
-                <div id="customerDetailsBox" className="customer-info-pill" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                  <i className="fa-solid fa-circle-check text-success" />
-                  <span>
-                    <strong>{selectedCustomer.name}</strong> | {selectedCustomer.region} ({selectedCustomer.email})
-                  </span>
+                <div
+                  id="customerDetailsBox"
+                  className="customer-info-pill"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    marginTop: 12,
+                    padding: '10px 12px',
+                    borderRadius: 12,
+                    background: 'rgba(5,150,105,0.1)',
+                    border: '1px solid rgba(5,150,105,0.25)',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 38,
+                      height: 38,
+                      borderRadius: '50%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 800,
+                      fontSize: 16,
+                      color: '#fff',
+                      background: 'linear-gradient(135deg, #7c3aed, #db2777)',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {(selectedCustomer.name || '?').charAt(0).toUpperCase()}
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{selectedCustomer.name}</div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--text-muted)',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      <i className="fa-solid fa-location-dot" style={{ marginRight: 4 }} />
+                      {selectedCustomer.region}
+                      <span style={{ margin: '0 6px' }}>•</span>
+                      <i className="fa-regular fa-envelope" style={{ marginRight: 4 }} />
+                      {selectedCustomer.email}
+                    </div>
+                  </div>
+                  <i className="fa-solid fa-circle-check text-success" style={{ fontSize: 18 }} />
                 </div>
               )}
             </div>
@@ -278,23 +389,32 @@ export default function POS() {
             <div className="card-body">
               <div className="form-group mb-2">
                 <label htmlFor="posProductSelect">Select Product</label>
-                <select
+                <SearchSelect
                   id="posProductSelect"
-                  className="form-control"
+                  icon="fa-magnifying-glass"
+                  options={productOptions}
                   value={selectedProductId}
-                  onChange={(e) => handleProductSelect(e.target.value)}
-                >
-                  <option value="">-- Choose Product to Add --</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      #{p.id} - {p.name} [{p.category} | {p.subcategory}] — ₹{p.price}/{p.unit} (Stock: {p.stock} {p.unit})
-                    </option>
-                  ))}
-                </select>
+                  onChange={handleProductSelect}
+                  placeholder="Search by name, ID, category or type..."
+                  emptyText="No matching product"
+                  maxHeight={300}
+                />
               </div>
 
               {selectedProduct && (
-                <div className="stock-indicator mb-3" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', padding: '0.6rem 0.8rem', background: 'var(--surface-header)', borderRadius: 'var(--radius-sm)' }}>
+                <div
+                  className="stock-indicator mb-3"
+                  style={{
+                    display: 'flex',
+                    gap: 14,
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    marginTop: 12,
+                    padding: '0.6rem 0.8rem',
+                    background: 'var(--surface-header)',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
+                >
                   <span>
                     Type: <strong className={`badge ${selectedProduct.subcategory === 'Open' ? 'badge-warning' : 'badge-info'}`}>{selectedProduct.subcategory}</strong>
                   </span>
@@ -307,7 +427,7 @@ export default function POS() {
                 </div>
               )}
 
-              <div className="form-row" style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
+              <div className="form-row" style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginTop: selectedProduct ? 0 : 12 }}>
                 <div className="form-group" style={{ flex: 1 }}>
                   <label htmlFor="posQuantity">
                     Quantity (in {selectedProduct ? selectedProduct.unit : 'units'})
@@ -320,6 +440,12 @@ export default function POS() {
                     step={selectedProduct?.unit === 'pcs' ? '1' : '0.25'}
                     value={quantity}
                     onChange={(e) => setQuantity(Number(e.target.value))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddToCart();
+                      }
+                    }}
                   />
                 </div>
                 <div className="form-group">
@@ -473,4 +599,3 @@ export default function POS() {
     </div>
   );
 }
-
