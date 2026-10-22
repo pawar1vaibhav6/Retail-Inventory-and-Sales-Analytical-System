@@ -1308,14 +1308,15 @@ body,
     margin-bottom: 1.5rem;
 }
 .demo-title { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; display: block; margin-bottom: 0.5rem; }
-.demo-buttons { display: flex; gap: 0.5rem; }
+.demo-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .demo-pill {
-    flex: 1; 
+    flex: 1 1 calc(33.333% - 0.5rem);
+    min-width: 95px;
     background: var(--surface); 
     border: 1px solid var(--border);
-    padding: 0.4rem 0.75rem; 
+    padding: 0.45rem 0.6rem; 
     border-radius: var(--radius-sm); 
-    font-size: 0.78rem;
+    font-size: 0.76rem;
     font-weight: 600; 
     cursor: pointer; 
     display: inline-flex; 
@@ -1323,11 +1324,18 @@ body,
     justify-content: center; 
     gap: 0.4rem;
     color: var(--text);
+    transition: all 0.18s ease;
 }
 .demo-pill:hover { 
     background: var(--hover); 
     border-color: var(--accent); 
+    transform: translateY(-1px);
 }
+.demo-pill.admin-pill:hover { border-color: #8b5cf6; color: #8b5cf6; }
+.demo-pill.supervisor-pill:hover { border-color: #f59e0b; color: #f59e0b; }
+.demo-pill.picker-pill:hover { border-color: #3b82f6; color: #3b82f6; }
+.demo-pill.manager-pill:hover { border-color: #10b981; color: #10b981; }
+.demo-pill.cashier-pill:hover { border-color: #06b6d4; color: #06b6d4; }
 
 .auth-form { display: flex; flex-direction: column; gap: 1.25rem; }
 .input-group { position: relative; display: flex; align-items: center; }

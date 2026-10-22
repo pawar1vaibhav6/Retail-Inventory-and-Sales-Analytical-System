@@ -3,7 +3,7 @@ import { NavLink, Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import ThemeToggle from "./ThemeToggle";
 
-const ADMIN_ONLY_PATHS = ["/products", "/analytics", "/charts"];
+const ADMIN_ONLY_PATHS = ["/products", "/analytics", "/charts", "/admin/policies", "/admin/roles"];
 
 const roleStyles = {
   admin: {
@@ -11,18 +11,56 @@ const roleStyles = {
     glow: "rgba(124,58,237,0.45)",
     icon: "#fde68a",
     iconClass: "fa-shield-halved",
+    title: "System Admin",
   },
   cashier: {
     bg: "linear-gradient(135deg, #0ea5e9, #10b981)",
     glow: "rgba(14,165,233,0.4)",
     icon: "#ffffff",
     iconClass: "fa-cash-register",
+    title: "Store Cashier",
+  },
+  store_supervisor: {
+    bg: "linear-gradient(135deg, #f59e0b, #d97706)",
+    glow: "rgba(245,158,11,0.4)",
+    icon: "#ffffff",
+    iconClass: "fa-user-tie",
+    title: "Store Supervisor",
+  },
+  store_executive: {
+    bg: "linear-gradient(135deg, #0284c7, #0369a1)",
+    glow: "rgba(2,132,199,0.4)",
+    icon: "#ffffff",
+    iconClass: "fa-clipboard-check",
+    title: "Store Executive",
+  },
+  warehouse_picker: {
+    bg: "linear-gradient(135deg, #2563eb, #4f46e5)",
+    glow: "rgba(37,99,235,0.4)",
+    icon: "#ffffff",
+    iconClass: "fa-dolly",
+    title: "DC Warehouse Picker",
+  },
+  category_manager: {
+    bg: "linear-gradient(135deg, #059669, #0d9488)",
+    glow: "rgba(5,150,105,0.4)",
+    icon: "#ffffff",
+    iconClass: "fa-chart-line",
+    title: "Category Manager",
+  },
+  accounts: {
+    bg: "linear-gradient(135deg, #0d9488, #115e59)",
+    glow: "rgba(13,148,136,0.4)",
+    icon: "#ffffff",
+    iconClass: "fa-file-invoice-dollar",
+    title: "Accounts Officer",
   },
   default: {
     bg: "linear-gradient(135deg, #64748b, #475569)",
     glow: "rgba(100,116,139,0.35)",
     icon: "#ffffff",
     iconClass: "fa-user",
+    title: "Staff Member",
   },
 };
 
@@ -42,7 +80,6 @@ export default function Sidebar({ isOpen, onClose }) {
     if (onClose) onClose();
   };
 
-  // Safe even when user is null (logged out)
   const role = user?.role || "cashier";
   const rs = roleStyles[role] || roleStyles.default;
   const isAdmin = role === "admin";
@@ -50,7 +87,6 @@ export default function Sidebar({ isOpen, onClose }) {
   const handleRoleSwitch = (nextRole) => {
     if (nextRole === role) return;
     if (typeof switchRole === "function") switchRole(nextRole);
-    // Leaving admin while on an admin-only page -> go to a safe page
     if (nextRole !== "admin" && ADMIN_ONLY_PATHS.includes(location.pathname)) {
       navigate("/dashboard");
     }
@@ -58,7 +94,12 @@ export default function Sidebar({ isOpen, onClose }) {
 
   const toggleOptions = [
     { value: "cashier", label: "Cashier", icon: "fa-cash-register" },
-    { value: "admin", label: "Admin", icon: "fa-shield-halved" },
+    { value: "store_executive", label: "Store Executive", icon: "fa-clipboard-check" },
+    { value: "store_supervisor", label: "Store Supervisor", icon: "fa-user-tie" },
+    { value: "warehouse_picker", label: "DC Picker", icon: "fa-dolly" },
+    { value: "category_manager", label: "Category Mgr", icon: "fa-chart-line" },
+    { value: "accounts", label: "Accounts Officer", icon: "fa-file-invoice-dollar" },
+    { value: "admin", label: "System Admin", icon: "fa-shield-halved" },
   ];
 
   return (
@@ -172,6 +213,64 @@ export default function Sidebar({ isOpen, onClose }) {
                   </NavLink>
                 </>
               )}
+
+              {/* Phase 1 Enterprise & Governance */}
+              {(isAdmin || role === "category_manager" || role === "accounts") && (
+                <>
+                  <div
+                    className="sidebar-section-label"
+                    style={{ marginTop: "0.85rem" }}
+                  >
+                    Enterprise &amp; Governance
+                  </div>
+                  {(isAdmin || role === "category_manager") && (
+                    <NavLink
+                      to="/admin/policies"
+                      onClick={handleLinkClick}
+                      className={({ isActive }) =>
+                        `sidebar-nav-item ${isActive ? "active" : ""}`
+                      }
+                    >
+                      <i className="fa-solid fa-sliders" />
+                      <span>Policy Settings</span>
+                    </NavLink>
+                  )}
+                  <NavLink
+                    to="/admin/supplier-terms"
+                    onClick={handleLinkClick}
+                    className={({ isActive }) =>
+                      `sidebar-nav-item ${isActive ? "active" : ""}`
+                    }
+                  >
+                    <i className="fa-solid fa-handshake" />
+                    <span>Supplier Terms</span>
+                  </NavLink>
+                  {isAdmin && (
+                    <NavLink
+                      to="/admin/roles"
+                      onClick={handleLinkClick}
+                      className={({ isActive }) =>
+                        `sidebar-nav-item ${isActive ? "active" : ""}`
+                      }
+                    >
+                      <i className="fa-solid fa-users-gear" />
+                      <span>Roles &amp; Scoping</span>
+                    </NavLink>
+                  )}
+                  {(isAdmin || role === "category_manager") && (
+                    <NavLink
+                      to="/admin/audit-log"
+                      onClick={handleLinkClick}
+                      className={({ isActive }) =>
+                        `sidebar-nav-item ${isActive ? "active" : ""}`
+                      }
+                    >
+                      <i className="fa-solid fa-clipboard-list" />
+                      <span>Audit Log</span>
+                    </NavLink>
+                  )}
+                </>
+              )}
             </nav>
           </>
         )}
@@ -194,86 +293,68 @@ export default function Sidebar({ isOpen, onClose }) {
                 boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
                 display: "flex",
                 flexDirection: "column",
-                gap: 12,
+                gap: 10,
               }}
             >
-              
+              {/* User Header */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: "50%",
+                      background: rs.bg,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#fff",
+                      fontSize: 14,
+                      boxShadow: `0 2px 8px ${rs.glow}`
+                    }}
+                  >
+                    <i className={`fa-solid ${rs.iconClass}`} />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13, lineHeight: 1.2 }}>{user.username}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{rs.title}</div>
+                  </div>
+                </div>
+                {user.store_id && (
+                  <span
+                    className="badge badge-secondary"
+                    style={{ fontSize: 10, padding: "2px 6px" }}
+                    title={`Assigned to Location #${user.store_id}`}
+                  >
+                    Loc #{user.store_id}
+                  </span>
+                )}
+              </div>
 
-              {/* Row 2: segmented role switch (Cashier | Admin) */}
-              <div
-                role="radiogroup"
-                aria-label="Switch role"
-                style={{
-                  position: "relative",
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  padding: 4,
-                  borderRadius: 999,
-                  background: "rgba(0,0,0,0.18)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  boxShadow: "inset 0 2px 6px rgba(0,0,0,0.18)",
-                }}
-              >
-                {/* Sliding thumb */}
-                <span
-                  aria-hidden="true"
+              {/* Persona / Role Selector */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                <label style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-muted)", fontWeight: 700 }}>
+                  Switch Role Persona:
+                </label>
+                <select
+                  value={role}
+                  onChange={(e) => handleRoleSwitch(e.target.value)}
+                  className="form-control"
                   style={{
-                    position: "absolute",
-                    top: 4,
-                    bottom: 4,
-                    left: 4,
-                    width: "calc(50% - 4px)",
-                    borderRadius: 999,
-                    background: rs.bg,
-                    boxShadow: `0 4px 14px ${rs.glow}, inset 0 1px 0 rgba(255,255,255,0.3)`,
-                    transform: isAdmin ? "translateX(100%)" : "translateX(0)",
-                    transition:
-                      "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s ease, box-shadow 0.3s ease",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    padding: "4px 8px",
+                    borderRadius: 8,
+                    background: "rgba(0,0,0,0.15)",
+                    color: "inherit"
                   }}
-                />
-
-                {toggleOptions.map((opt) => {
-                  const active = role === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={active}
-                      onClick={() => handleRoleSwitch(opt.value)}
-                      title={`Switch to ${opt.label}`}
-                      style={{
-                        position: "relative",
-                        zIndex: 1,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 6,
-                        padding: "7px 8px",
-                        border: "none",
-                        outline: "none",
-                        background: "transparent",
-                        borderRadius: 999,
-                        fontSize: 12.5,
-                        fontWeight: active ? 700 : 600,
-                        letterSpacing: "0.03em",
-                        color: active ? "#fff" : "var(--bs-body-color, #111827)",
-                        opacity: active ? 1 : 0.65,
-                        cursor: active ? "default" : "pointer",
-                        transition: "color 0.25s ease, opacity 0.25s ease",
-                      }}
-                    >
-                      <i
-                        className={`fa-solid ${opt.icon}`}
-                        style={{
-                          fontSize: 11,
-                          color: active && opt.value === "admin" ? "#fde68a" : "inherit",
-                        }}
-                      />
-                      <span>{opt.label}</span>
-                    </button>
-                  );
-                })}
+                >
+                  {toggleOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 

@@ -53,6 +53,19 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const switchRole = (nextRole) => {
+    setUser(prev => {
+      if (!prev) return prev;
+      let newStoreId = prev.store_id;
+      if (['store_supervisor', 'store_executive', 'cashier'].includes(nextRole)) {
+        newStoreId = prev.store_id || 2;
+      } else if (nextRole === 'warehouse_picker') {
+        newStoreId = 1;
+      }
+      return { ...prev, role: nextRole, store_id: newStoreId };
+    });
+  };
+
   const logout = async () => {
     try {
       await authAPI.logout();
@@ -64,7 +77,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout }}>
+    <AuthContext.Provider value={{ user, login, register, logout, switchRole }}>
       {children}
     </AuthContext.Provider>
   );

@@ -96,11 +96,16 @@ export default function Register() {
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
               >
-                <option value="cashier">Cashier (Sales &amp; Invoicing)</option>
-                <option value="admin">Admin (Inventory &amp; Analytics)</option>
+                <option value="cashier">Cashier (Sales &amp; POS Billing)</option>
+                <option value="store_executive">Store Executive (Physical Audits &amp; Markdown Proposals)</option>
+                <option value="store_supervisor">Store Supervisor (Audits, Returns &amp; Markdowns)</option>
+                <option value="warehouse_picker">Warehouse Picker (DC GRN &amp; FEFO Picking)</option>
+                <option value="category_manager">Category Manager (Expiry Analytics &amp; Reports)</option>
+                <option value="accounts">Accounts Officer (Debit Notes &amp; Credit Reconciliation)</option>
+                <option value="admin">Admin (Full System Access)</option>
               </select>
             </div>
-            <small className="form-hint">Admins have full access; Cashiers have sales access.</small>
+            <small className="form-hint">Enterprise role permissions and store scoping apply automatically.</small>
           </div>
 
           <div className="form-group">
@@ -167,4 +172,3 @@ export default function Register() {
     </div>
   );
 }
-

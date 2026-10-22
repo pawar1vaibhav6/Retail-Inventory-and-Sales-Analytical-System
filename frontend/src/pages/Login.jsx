@@ -12,13 +12,26 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const handleDemoFill = (u, p) => {
+  const handleDemoFill = async (u, p, roleTitle = '') => {
     setUsername(u);
     setPassword(p);
+    setLoading(true);
     setAlert({
       type: 'info',
-      message: `Demo credentials for "${u}" loaded! Click "Sign In" below.`
+      message: `Signing in as ${roleTitle || u} (${u})...`
     });
+    try {
+      const res = await login(u, p);
+      if (res.success) {
+        navigate('/dashboard');
+      } else {
+        setAlert({ type: 'danger', message: res.message });
+      }
+    } catch (err) {
+      setAlert({ type: 'danger', message: err.message || 'Login failed.' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -51,23 +64,67 @@ export default function Login() {
           <p>Sign in to your RetailSphere portal</p>
         </div>
 
-        {/* Quick Demo Fill Pills */}
+        {/* Quick Demo Fill Pills for all 7 roles */}
         <div className="demo-credentials-box">
           <span className="demo-title">
-            <i className="fa-solid fa-bolt" /> Quick Demo Logins:
+            <i className="fa-solid fa-bolt" /> One-Click Demo Logins (All 7 Roles):
           </span>
-          <div className="demo-buttons">
+          <div className="demo-buttons" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
             <button
               type="button"
               className="demo-pill admin-pill"
-              onClick={() => handleDemoFill('admin', 'admin123')}
+              onClick={() => handleDemoFill('admin', 'admin123', 'System Admin')}
+              title="Full enterprise system access, master data & policies"
             >
-              <i className="fa-solid fa-user-shield" /> Admin
+              <i className="fa-solid fa-shield-halved" /> Admin
+            </button>
+            <button
+              type="button"
+              className="demo-pill supervisor-pill"
+              onClick={() => handleDemoFill('supervisor', 'supervisor123', 'Store Supervisor')}
+              title="Store audits, markdowns <= 25%, expiry returns & replenishment"
+            >
+              <i className="fa-solid fa-user-tie" /> Supervisor
+            </button>
+            <button
+              type="button"
+              className="demo-pill executive-pill"
+              style={{ background: '#f0f9ff', color: '#0369a1', borderColor: '#bae6fd' }}
+              onClick={() => handleDemoFill('executive', 'executive123', 'Store Executive')}
+              title="Physical counts, markdown proposals, return drafting (Store-101)"
+            >
+              <i className="fa-solid fa-clipboard-check" /> Store Exec
+            </button>
+            <button
+              type="button"
+              className="demo-pill picker-pill"
+              onClick={() => handleDemoFill('picker', 'picker123', 'DC Warehouse Picker')}
+              title="Central DC inward GRN & FEFO replenishment picking"
+            >
+              <i className="fa-solid fa-dolly" /> DC Picker
+            </button>
+            <button
+              type="button"
+              className="demo-pill manager-pill"
+              onClick={() => handleDemoFill('manager', 'manager123', 'Category Manager')}
+              title="Cross-store reports, high markdowns > 25%, dump stock & transfers"
+            >
+              <i className="fa-solid fa-chart-line" /> Category Mgr
+            </button>
+            <button
+              type="button"
+              className="demo-pill accounts-pill"
+              style={{ background: '#f0fdfa', color: '#0f766e', borderColor: '#99f6e4' }}
+              onClick={() => handleDemoFill('accounts', 'accounts123', 'Accounts Officer')}
+              title="Supplier debit notes & vendor credit reconciliation"
+            >
+              <i className="fa-solid fa-file-invoice-dollar" /> Accounts
             </button>
             <button
               type="button"
               className="demo-pill cashier-pill"
-              onClick={() => handleDemoFill('cashier', 'cashier123')}
+              onClick={() => handleDemoFill('cashier', 'cashier123', 'Store Cashier')}
+              title="POS billing & barcode scanning with expiry defense"
             >
               <i className="fa-solid fa-cash-register" /> Cashier
             </button>
@@ -165,4 +222,3 @@ export default function Login() {
     </div>
   );
 }
-

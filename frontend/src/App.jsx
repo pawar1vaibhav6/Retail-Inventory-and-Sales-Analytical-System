@@ -11,7 +11,13 @@ import Charts from './pages/Charts';
 import Login from './pages/Login';
 import Register from './pages/Register';
 
-function ProtectedRoute({ children, adminOnly = false }) {
+// Phase 1 Foundation Pages
+import PolicySettings from './pages/PolicySettings';
+import SupplierTerms from './pages/SupplierTerms';
+import RolesPermissions from './pages/RolesPermissions';
+import AuditLog from './pages/AuditLog';
+
+function ProtectedRoute({ children, adminOnly = false, allowedRoles = [] }) {
   const { user } = useAuth();
 
   if (!user) {
@@ -19,6 +25,10 @@ function ProtectedRoute({ children, adminOnly = false }) {
   }
 
   if (adminOnly && user.role !== 'admin') {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  if (allowedRoles.length > 0 && !allowedRoles.includes(user.role) && user.role !== 'admin') {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -75,6 +85,48 @@ export default function App() {
             element={
               <ProtectedRoute adminOnly>
                 <Charts />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Phase 1 Foundation Pages */}
+          <Route
+            path="admin/policies"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'category_manager']}>
+                <PolicySettings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="admin/policy-settings"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'category_manager']}>
+                <PolicySettings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="admin/supplier-terms"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'category_manager', 'accounts']}>
+                <SupplierTerms />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="admin/roles"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <RolesPermissions />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="admin/audit-log"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'category_manager']}>
+                <AuditLog />
               </ProtectedRoute>
             }
           />

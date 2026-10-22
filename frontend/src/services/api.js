@@ -7,9 +7,25 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 async function request(endpoint, options = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
+  
+  // Attach user context headers if present in localStorage
+  let authHeaders = {};
+  try {
+    const saved = localStorage.getItem('retailsphere_user');
+    if (saved) {
+      const u = JSON.parse(saved);
+      if (u.role) authHeaders['X-User-Role'] = u.role;
+      if (u.id) authHeaders['X-User-Id'] = String(u.id);
+      if (u.username) authHeaders['X-Username'] = u.username;
+      if (u.store_id !== undefined && u.store_id !== null) authHeaders['X-Store-Id'] = String(u.store_id);
+    }
+  } catch {}
+
   const config = {
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      ...authHeaders,
       ...options.headers
     },
     ...options
@@ -198,6 +214,43 @@ export const chartsAPI = {
   }
 };
 
+// -----------------------------------------------------------------------------
+// Phase 1 Foundation: Enterprise Admin & Governance API
+// -----------------------------------------------------------------------------
+export const adminAPI = {
+  getPolicies: async () => {
+    return request('/api/admin/policies');
+  },
+  updatePolicy: async (policy_key, policy_value) => {
+    return request('/api/admin/policies', {
+      method: 'PUT',
+      body: JSON.stringify({ policy_key, policy_value })
+    });
+  },
+  getSupplierTerms: async () => {
+    return request('/api/admin/supplier-terms');
+  },
+  updateSupplierTerms: async (supplier_id, data) => {
+    return request(`/api/admin/supplier-terms/${supplier_id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  },
+  getRoles: async () => {
+    return request('/api/admin/roles');
+  },
+  updateRole: async (user_id, data) => {
+    return request(`/api/admin/roles/${user_id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  },
+  getAuditLogs: async (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/api/admin/audit-log${qs ? `?${qs}` : ''}`);
+  }
+};
+
 export default {
   auth: authAPI,
   dashboard: dashboardAPI,
@@ -206,5 +259,6 @@ export default {
   pos: posAPI,
   orders: ordersAPI,
   analytics: analyticsAPI,
-  charts: chartsAPI
+  charts: chartsAPI,
+  admin: adminAPI
 };

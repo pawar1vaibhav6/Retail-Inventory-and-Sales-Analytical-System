@@ -2,7 +2,7 @@ import datetime
 import os
 import pymysql
 from functools import wraps
-from flask import Flask, request, session, jsonify
+from flask import Flask, request, session, jsonify, g
 from flask_cors import CORS
 
 # Load environment variables from .env
@@ -29,6 +29,78 @@ from gst_classifier import (
     UnknownHSNError,
     ClassificationError
 )
+import batch_engine as be
+from batch_engine import (
+    validate_batch_grn_item,
+    record_grn,
+    allocate_fefo,
+    create_replenishment_request,
+    process_replenishment_allocation,
+    dispatch_replenishment_transfer,
+    receive_replenishment_at_store,
+    get_batch_traceability,
+    get_expiry_stock_report,
+    detect_dump_stock,
+    get_interstore_transfer_suggestions,
+    create_code_audit,
+    submit_code_audit,
+    approve_code_audit,
+    calculate_markdown_suggestions,
+    approve_markdown,
+    get_active_markdown_for_batch,
+    create_expiry_return,
+    post_expiry_return_atomic,
+    validate_batch_for_pos,
+    record_movement,
+    enforce_store_scoping,
+    validate_segregation_of_duties,
+    log_audit_event,
+    get_system_policy,
+    update_system_policy,
+    ValidationError as BatchValidationError,
+    InsufficientStockError,
+    PolicyViolationError,
+    SegregationOfDutiesError,
+    StoreScopingError
+)
+
+VALID_ROLES = ("admin", "cashier", "store_supervisor", "store_executive", "warehouse_picker", "category_manager", "accounts")
+
+def require_roles(*allowed_roles):
+    """Decorator enforcing role-based endpoint access control and context extraction."""
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            user_role = session.get("role") or request.headers.get("X-User-Role") or "cashier"
+            store_id = session.get("store_id")
+            if store_id is None and request.headers.get("X-Store-Id"):
+                try:
+                    store_id = int(request.headers.get("X-Store-Id"))
+                except (ValueError, TypeError):
+                    store_id = None
+            username = session.get("username") or request.headers.get("X-Username") or "anonymous"
+            user_id = session.get("user_id")
+            if user_id is None and request.headers.get("X-User-Id"):
+                try:
+                    user_id = int(request.headers.get("X-User-Id"))
+                except (ValueError, TypeError):
+                    user_id = 1
+
+            g.user_role = user_role
+            g.user_store_id = store_id
+            g.username = username
+            g.user_id = user_id or 1
+
+            if "admin" in allowed_roles and user_role == "admin":
+                return fn(*args, **kwargs)
+            if user_role not in allowed_roles:
+                return jsonify({
+                    "success": False,
+                    "message": f"Access denied. Requires one of roles: {', '.join(allowed_roles)} (current: {user_role})"
+                }), 403
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "retailsphere-secure-secret-key-2026")
@@ -137,13 +209,15 @@ def api_login():
         session["user_id"] = user["user_id"]
         session["username"] = user["username"]
         session["role"] = user["role"]
+        session["store_id"] = user.get("store_id")
         return jsonify({
             "success": True,
             "message": f"Welcome back, {user['username']}!",
             "user": {
                 "id": user["user_id"],
                 "username": user["username"],
-                "role": user["role"]
+                "role": user["role"],
+                "store_id": user.get("store_id")
             }
         })
     return jsonify({"success": False, "message": "Invalid username or password."}), 401
@@ -156,6 +230,7 @@ def api_register():
     username = data.get("username", "").strip()
     password = data.get("password", "").strip()
     role = data.get("role", "cashier").strip().lower()
+    store_id = data.get("store_id")
 
     if not username or not password:
         return jsonify({"success": False, "message": "Username and password are required."}), 400
@@ -163,20 +238,21 @@ def api_register():
     if len(password) < 4:
         return jsonify({"success": False, "message": "Password must be at least 4 characters long."}), 400
 
-    if role not in ("admin", "cashier"):
+    if role not in VALID_ROLES:
         role = "cashier"
 
-    success, msg = register_user(username, password, role)
+    success, msg = register_user(username, password, role, store_id)
     if success:
         user = verify_user(username, password)
         if user:
             session["user_id"] = user["user_id"]
             session["username"] = user["username"]
             session["role"] = user["role"]
+            session["store_id"] = user.get("store_id")
         return jsonify({
             "success": True,
             "message": f"Account for '{username}' created successfully!",
-            "user": user or {"id": 1, "username": username, "role": role}
+            "user": user or {"id": 1, "username": username, "role": role, "store_id": store_id}
         })
     return jsonify({"success": False, "message": msg}), 400
 
@@ -196,7 +272,8 @@ def api_me():
             "user": {
                 "id": session["user_id"],
                 "username": session["username"],
-                "role": session.get("role", "cashier")
+                "role": session.get("role", "cashier"),
+                "store_id": session.get("store_id")
             }
         })
     return jsonify({"success": False, "user": None})
@@ -302,7 +379,11 @@ def api_get_products():
                        COALESCE(is_packaged, 1) AS is_packaged,
                        COALESCE(is_branded, 1) AS is_branded,
                        COALESCE(bundle_type, '') AS bundle_type,
-                       COALESCE(discount, 0.0) AS discount
+                       COALESCE(discount, 0.0) AS discount,
+                       COALESCE(is_batch_controlled, 0) AS is_batch_controlled,
+                       COALESCE(has_expiry, 0) AS has_expiry,
+                       COALESCE(min_shelf_life_days, 0) AS min_shelf_life_days,
+                       COALESCE(floor_price_percent, 50.00) AS floor_price_percent
                 FROM Products WHERE 1=1
             """
             params = []
@@ -334,7 +415,11 @@ def api_get_products():
                     "is_packaged": bool(r[9]) if len(r) > 9 else True,
                     "is_branded": bool(r[10]) if len(r) > 10 else True,
                     "bundle_type": r[11] if len(r) > 11 and r[11] else None,
-                    "discount": float(r[12]) if len(r) > 12 and r[12] is not None else 0.0
+                    "discount": float(r[12]) if len(r) > 12 and r[12] is not None else 0.0,
+                    "is_batch_controlled": bool(r[13]) if len(r) > 13 else False,
+                    "has_expiry": bool(r[14]) if len(r) > 14 else False,
+                    "min_shelf_life_days": int(r[15]) if len(r) > 15 and r[15] is not None else 0,
+                    "floor_price_percent": float(r[16]) if len(r) > 16 and r[16] is not None else 50.0
                 })
     finally:
         conn.close()
@@ -378,6 +463,12 @@ def api_add_product():
                 is_branded = 0 if str(data.get("is_branded", "")).lower() in ("0", "false") else 1
                 bundle_type = data.get("bundle_type") or None
 
+                # Batch & expiry attributes
+                is_batch_ctrl = 1 if str(data.get("is_batch_controlled", "")).lower() in ("1", "true") else 0
+                has_exp = 1 if str(data.get("has_expiry", "")).lower() in ("1", "true") else is_batch_ctrl
+                min_shelf = int(data.get("min_shelf_life_days") or 0)
+                floor_price_pct = float(data.get("floor_price_percent") or 50.00)
+
                 # Discount attribute (0-100%, default 0.0)
                 disc_input = data.get("discount")
                 try:
@@ -388,11 +479,13 @@ def api_add_product():
                 cur.execute("""
                     INSERT INTO Products (
                         product_id, p_name, category, subcategory, price, stock_quantity, cost, unit,
-                        hsn_code, is_packaged, is_branded, bundle_type, discount
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        hsn_code, is_packaged, is_branded, bundle_type, discount,
+                        is_batch_controlled, has_expiry, min_shelf_life_days, floor_price_percent
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     pid, p_name, category, subcategory, price, stock, cost, unit,
-                    hsn_code, is_packaged, is_branded, bundle_type, discount
+                    hsn_code, is_packaged, is_branded, bundle_type, discount,
+                    is_batch_ctrl, has_exp, min_shelf, floor_price_pct
                 ))
                 conn.commit()
 
@@ -410,7 +503,11 @@ def api_add_product():
                     "is_packaged": bool(is_packaged),
                     "is_branded": bool(is_branded),
                     "bundle_type": bundle_type,
-                    "discount": discount
+                    "discount": discount,
+                    "is_batch_controlled": bool(is_batch_ctrl),
+                    "has_expiry": bool(has_exp),
+                    "min_shelf_life_days": min_shelf,
+                    "floor_price_percent": floor_price_pct
                 }
                 return jsonify({
                     "success": True,
@@ -775,7 +872,8 @@ def api_pos_checkout():
                            COALESCE(is_packaged, 1) AS is_packaged,
                            COALESCE(is_branded, 1) AS is_branded,
                            COALESCE(bundle_type, '') AS bundle_type,
-                           COALESCE(discount, 0.0) AS discount
+                           COALESCE(discount, 0.0) AS discount,
+                           COALESCE(is_batch_controlled, 0) AS is_batch_ctrl
                     FROM Products WHERE product_id = %s FOR UPDATE
                 """, (pid,))
                 prod = cur.fetchone()
@@ -783,8 +881,20 @@ def api_pos_checkout():
                     conn.rollback()
                     return jsonify({"success": False, "message": f"Product #{pid} not found in catalog."}), 400
 
-                p_name, category, price, stock_qty, raw_unit, raw_subcat, raw_hsn, raw_pkg, raw_brd, raw_bundle, discount = prod
+                p_name, category, price, stock_qty, raw_unit, raw_subcat, raw_hsn, raw_pkg, raw_brd, raw_bundle, discount, is_batch_ctrl = prod
                 unit = get_product_unit(category, p_name, explicit_unit=raw_unit, subcategory=raw_subcat)
+
+                store_location_id = int(item.get("location_id") or data.get("location_id") or 2)
+                req_batch_id = item.get("batch_id")
+
+                # Validate batch at POS if batch-controlled or batch specified
+                selected_batch = None
+                if is_batch_ctrl or req_batch_id:
+                    val_res = validate_batch_for_pos(cur, pid, req_batch_id, qty, store_location_id)
+                    if not val_res["valid"]:
+                        conn.rollback()
+                        return jsonify({"success": False, "message": val_res["reason"]}), 400
+                    selected_batch = val_res["batch"]
 
                 if qty > stock_qty:
                     conn.rollback()
@@ -823,31 +933,49 @@ def api_pos_checkout():
                     gst_rate, cgst_rate, sgst_rate = get_gst_rate(category)
                     hsn_code = explicit_item_hsn or "9988"
 
-                # Apply Discount & GST Calculation Rule:
-                # Discounted price = price - (price * discount / 100)
-                # GST amount = discounted price * GST rate
-                # Line total = (discounted price + GST) * quantity
+                # Apply Discount & GST Calculation Rule with push-sale markdown check
                 item_discount = float(item.get("discount") if item.get("discount") is not None else (discount or 0.0))
+                if selected_batch:
+                    active_mkd = get_active_markdown_for_batch(cur, selected_batch["batch_id"], store_location_id)
+                    if active_mkd:
+                        item_discount = max(item_discount, float(active_mkd["approved_discount_percent"]))
+
                 calc = calculate_discount_and_gst(price, item_discount, gst_rate, qty)
 
                 item_subtotal = calc["line_subtotal"]
                 item_gst = calc["line_gst"]
                 item_final = calc["line_total"]
 
+                batch_id_val = selected_batch["batch_id"] if selected_batch else None
+                batch_num_val = selected_batch["batch_number"] if selected_batch else None
+
                 # Insert Sale record
                 cur.execute(
-                    "INSERT INTO Sales (product_id, customer_id, Date, quantity, total_amount, gst_amount) VALUES (%s, %s, NOW(), %s, %s, %s)",
-                    (pid, customer_id, qty, int(item_subtotal), int(item_gst))
+                    "INSERT INTO Sales (product_id, customer_id, Date, quantity, total_amount, gst_amount, batch_id, batch_number, location_id) VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s, %s)",
+                    (pid, customer_id, qty, int(item_subtotal), int(item_gst), batch_id_val, batch_num_val, store_location_id)
                 )
                 sale_id = cur.lastrowid
                 created_sale_ids.append(sale_id)
 
                 # Deduct stock
                 cur.execute("UPDATE Products SET stock_quantity = stock_quantity - %s WHERE product_id = %s", (qty, pid))
+                if selected_batch:
+                    cur.execute("""
+                        UPDATE batch_stock SET quantity_saleable = quantity_saleable - %s 
+                        WHERE product_id = %s AND batch_id = %s AND location_id = %s
+                    """, (qty, pid, selected_batch["batch_id"], store_location_id))
+                    record_movement(
+                        cur, product_id=pid, batch_id=selected_batch["batch_id"],
+                        batch_number=selected_batch["batch_number"],
+                        from_loc=store_location_id, to_loc=None, movement_type='POS_SALE',
+                        qty=qty, ref_type='SALE', ref_id=str(sale_id), user='POS'
+                    )
 
                 bill_items.append({
                     "id": pid,
                     "product_id": pid,
+                    "batch_id": batch_id_val,
+                    "batch_number": batch_num_val,
                     "name": p_name,
                     "hsn_code": hsn_code,
                     "hsn": hsn_code,
@@ -1261,6 +1389,862 @@ def api_chart_data():
         conn.close()
 
     return jsonify(result)
+
+
+# -----------------------------------------------------------------------------
+# Multi-Echelon Locations & Suppliers Endpoints
+# -----------------------------------------------------------------------------
+@app.route("/api/locations", methods=["GET"])
+def api_get_locations():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT location_id, code, name, type, footfall_tier, address FROM locations ORDER BY location_id ASC")
+            locs = [
+                {"id": r[0], "code": r[1], "name": r[2], "type": r[3], "footfall_tier": r[4], "address": r[5]}
+                for r in cur.fetchall()
+            ]
+            return jsonify({"success": True, "locations": locs})
+    finally:
+        conn.close()
+
+
+@app.route("/api/suppliers", methods=["GET", "POST"])
+def api_suppliers():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            if request.method == "POST":
+                data = request.get_json(silent=True) or request.form
+                name = (data.get("name") or data.get("supplier_name") or "").strip()
+                if not name:
+                    return jsonify({"success": False, "message": "Supplier name is required."}), 400
+                gstin = data.get("gstin")
+                email = data.get("contact_email")
+                phone = data.get("phone")
+                win_days = int(data.get("expiry_return_window_days") or 30)
+
+                cur.execute("""
+                    INSERT INTO suppliers (supplier_name, gstin, contact_email, phone, expiry_return_window_days)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (name, gstin, email, phone, win_days))
+                conn.commit()
+                return jsonify({"success": True, "supplier_id": cur.lastrowid, "message": f"Supplier '{name}' registered."}), 201
+
+            cur.execute("SELECT supplier_id, supplier_name, gstin, contact_email, phone, expiry_return_window_days FROM suppliers ORDER BY supplier_id ASC")
+            sups = [
+                {"id": r[0], "name": r[1], "gstin": r[2], "contact_email": r[3], "phone": r[4], "expiry_return_window_days": r[5]}
+                for r in cur.fetchall()
+            ]
+            return jsonify({"success": True, "suppliers": sups})
+    finally:
+        conn.close()
+
+
+# -----------------------------------------------------------------------------
+# Distribution Center Goods Received Note (GRN) Inwarding
+# -----------------------------------------------------------------------------
+@app.route("/api/grn", methods=["GET", "POST"])
+@require_roles("admin", "warehouse_picker")
+def api_grn():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            if request.method == "POST":
+                data = request.get_json(silent=True) or {}
+                loc_id = int(data.get("location_id") or 1)
+                sup_id = int(data.get("supplier_id") or 1)
+                received_by = session.get("username") or data.get("received_by") or "picker"
+                items = data.get("items", [])
+                invoice_no = data.get("invoice_no")
+                remarks = data.get("remarks")
+
+                res = record_grn(cur, location_id=loc_id, supplier_id=sup_id,
+                                 received_by=received_by, items_data=items,
+                                 invoice_no=invoice_no, remarks=remarks)
+                conn.commit()
+                return jsonify({"success": True, "grn": res}), 201
+
+            # GET: list past GRNs
+            cur.execute("""
+                SELECT g.grn_id, g.grn_number, l.name AS location_name, s.supplier_name,
+                       g.invoice_no, g.receipt_date, g.received_by, g.status,
+                       COUNT(gi.grn_item_id) AS total_items, COALESCE(SUM(gi.received_qty), 0) AS total_qty
+                FROM grn_receipts g
+                JOIN locations l ON g.location_id = l.location_id
+                JOIN suppliers s ON g.supplier_id = s.supplier_id
+                LEFT JOIN grn_items gi ON g.grn_id = gi.grn_id
+                GROUP BY g.grn_id, g.grn_number, l.name, s.supplier_name, g.invoice_no, g.receipt_date, g.received_by, g.status
+                ORDER BY g.grn_id DESC LIMIT 50
+            """)
+            grn_list = [
+                {
+                    "grn_id": r[0], "grn_number": r[1], "location": r[2], "supplier": r[3],
+                    "invoice_no": r[4], "receipt_date": str(r[5]), "received_by": r[6],
+                    "status": r[7], "total_items": r[8], "total_quantity": r[9]
+                }
+                for r in cur.fetchall()
+            ]
+            return jsonify({"success": True, "grns": grn_list})
+    except (BatchValidationError, PolicyViolationError) as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 400
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": f"GRN failed: {e}"}), 500
+    finally:
+        conn.close()
+
+
+# -----------------------------------------------------------------------------
+# Store Replenishment Requests & System-Enforced FEFO Picking
+# -----------------------------------------------------------------------------
+@app.route("/api/replenishment/request", methods=["POST"])
+@require_roles("admin", "store_supervisor")
+def api_create_replenishment():
+    data = request.get_json(silent=True) or {}
+    from_loc = int(data.get("from_location_id") or 1)  # Default DC
+    to_loc = int(data.get("to_location_id") or 2)      # Default Store
+    req_by = session.get("username") or data.get("requested_by") or "supervisor"
+    items = data.get("items", [])
+
+    if not items:
+        return jsonify({"success": False, "message": "Replenishment items required."}), 400
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            res = create_replenishment_request(cur, from_loc, to_loc, req_by, items)
+            conn.commit()
+            return jsonify({"success": True, "replenishment": res}), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/replenishment/<int:rep_id>/allocate-fefo", methods=["POST"])
+@require_roles("admin", "warehouse_picker")
+def api_allocate_fefo_endpoint(rep_id):
+    data = request.get_json(silent=True) or {}
+    allocated_by = session.get("username") or data.get("allocated_by") or "picker"
+    user_role = session.get("role") or request.headers.get("X-User-Role") or "warehouse_picker"
+    overrides = data.get("overrides")
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            res = process_replenishment_allocation(cur, rep_id, allocated_by, user_role, overrides)
+            conn.commit()
+            return jsonify({"success": True, "allocation": res})
+    except (InsufficientStockError, PolicyViolationError, BatchValidationError) as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 400
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/replenishment/<int:rep_id>/pick", methods=["POST"])
+@require_roles("admin", "warehouse_picker")
+def api_pick_replenishment(rep_id):
+    picker = session.get("username") or "picker"
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            res = dispatch_replenishment_transfer(cur, rep_id, picker)
+            conn.commit()
+            return jsonify({"success": True, "transfer": res})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 400
+    finally:
+        conn.close()
+
+
+@app.route("/api/replenishment/<int:rep_id>/receive", methods=["POST"])
+@require_roles("admin", "store_supervisor")
+def api_receive_replenishment(rep_id):
+    receiver = session.get("username") or "supervisor"
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            res = receive_replenishment_at_store(cur, rep_id, receiver)
+            conn.commit()
+            return jsonify({"success": True, "receipt": res})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 400
+    finally:
+        conn.close()
+
+
+@app.route("/api/replenishment", methods=["GET"])
+def api_list_replenishments():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT r.replenishment_id, r.request_number, lf.name AS from_loc, lt.name AS to_loc,
+                       r.status, r.requested_by, r.allocated_by, r.created_at,
+                       COUNT(ri.item_id) AS total_items, COALESCE(SUM(ri.requested_qty), 0) AS total_requested
+                FROM store_replenishments r
+                JOIN locations lf ON r.from_location_id = lf.location_id
+                JOIN locations lt ON r.to_location_id = lt.location_id
+                LEFT JOIN replenishment_items ri ON r.replenishment_id = ri.replenishment_id
+                GROUP BY r.replenishment_id, r.request_number, lf.name, lt.name, r.status, r.requested_by, r.allocated_by, r.created_at
+                ORDER BY r.replenishment_id DESC
+            """)
+            orders = [
+                {
+                    "replenishment_id": r[0], "request_number": r[1], "from_location": r[2],
+                    "to_location": r[3], "status": r[4], "requested_by": r[5], "allocated_by": r[6],
+                    "created_at": str(r[7]), "total_items": r[8], "total_requested": r[9]
+                }
+                for r in cur.fetchall()
+            ]
+            return jsonify({"success": True, "replenishments": orders})
+    finally:
+        conn.close()
+
+
+# -----------------------------------------------------------------------------
+# Batch Master & Full End-to-End Traceability Query
+# -----------------------------------------------------------------------------
+@app.route("/api/batches/traceability/<batch_number>", methods=["GET"])
+def api_trace_batch(batch_number):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            trace = get_batch_traceability(cur, batch_number)
+            return jsonify({"success": True, "traceability": trace})
+    except BatchValidationError as e:
+        return jsonify({"success": False, "message": str(e)}), 404
+    finally:
+        conn.close()
+
+
+@app.route("/api/batches", methods=["GET"])
+def api_list_batches():
+    pid = request.args.get("product_id", type=int)
+    loc_id = request.args.get("location_id", type=int)
+    status = request.args.get("status")
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            query = """
+                SELECT b.batch_id, b.product_id, p.p_name, b.batch_number,
+                       b.mfg_date, b.expiry_date, DATEDIFF(b.expiry_date, CURRENT_DATE()) AS days_left,
+                       b.cost_price, b.mrp, b.status,
+                       COALESCE(bs.quantity_saleable, 0) AS saleable,
+                       COALESCE(bs.quantity_reserved, 0) AS reserved,
+                       COALESCE(bs.quantity_scrap, 0) AS scrap,
+                       COALESCE(l.name, 'All Locations') AS location_name
+                FROM batches b
+                JOIN Products p ON b.product_id = p.product_id
+                LEFT JOIN batch_stock bs ON b.batch_id = bs.batch_id
+                LEFT JOIN locations l ON bs.location_id = l.location_id
+                WHERE 1=1
+            """
+            params = []
+            if pid:
+                query += " AND b.product_id = %s"
+                params.append(pid)
+            if loc_id:
+                query += " AND bs.location_id = %s"
+                params.append(loc_id)
+            if status:
+                query += " AND b.status = %s"
+                params.append(status)
+
+            query += " ORDER BY b.expiry_date ASC, b.batch_id ASC"
+            cur.execute(query, params)
+            batches = [
+                {
+                    "batch_id": r[0], "product_id": r[1], "product_name": r[2],
+                    "batch_number": r[3], "mfg_date": str(r[4]), "expiry_date": str(r[5]),
+                    "days_to_expiry": r[6], "cost_price": float(r[7]), "mrp": float(r[8]),
+                    "status": r[9], "quantity_saleable": r[10], "quantity_reserved": r[11],
+                    "quantity_scrap": r[12], "location_name": r[13]
+                }
+                for r in cur.fetchall()
+            ]
+            return jsonify({"success": True, "batches": batches})
+    finally:
+        conn.close()
+
+
+# -----------------------------------------------------------------------------
+# Expiry Stock Reports, Dump Stock, and Transfer Advice
+# -----------------------------------------------------------------------------
+@app.route("/api/reports/expiry-stock", methods=["GET"])
+def api_report_expiry_stock():
+    days = request.args.get("days", default=30, type=int)
+    loc_id = request.args.get("location_id", type=int)
+    category = request.args.get("category")
+    supplier_id = request.args.get("supplier_id", type=int)
+    product_id = request.args.get("product_id", type=int)
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            report = get_expiry_stock_report(
+                cur, days_threshold=days, location_id=loc_id,
+                category=category, supplier_id=supplier_id, product_id=product_id
+            )
+            return jsonify({"success": True, "report": report})
+    finally:
+        conn.close()
+
+
+@app.route("/api/reports/dump-stock", methods=["GET"])
+def api_report_dump_stock():
+    days = request.args.get("days", default=30, type=int)
+    lookback = request.args.get("lookback", default=30, type=int)
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            dumps = detect_dump_stock(cur, days_threshold=days, sales_lookback_days=lookback)
+            return jsonify({"success": True, "dump_stock": dumps})
+    finally:
+        conn.close()
+
+
+@app.route("/api/reports/transfer-suggestions", methods=["GET"])
+def api_report_transfer_suggestions():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            suggestions = get_interstore_transfer_suggestions(cur)
+            return jsonify({"success": True, "suggestions": suggestions})
+    finally:
+        conn.close()
+
+
+# -----------------------------------------------------------------------------
+# Code Management (Store Physical Audits)
+# -----------------------------------------------------------------------------
+@app.route("/api/audits/create", methods=["POST"])
+@require_roles("admin", "store_supervisor")
+def api_create_audit():
+    data = request.get_json(silent=True) or {}
+    loc_id = int(data.get("location_id") or 2)
+    user = session.get("username") or "supervisor"
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            res = create_code_audit(cur, loc_id, user)
+            conn.commit()
+            return jsonify({"success": True, "audit": res}), 201
+    finally:
+        conn.close()
+
+
+@app.route("/api/audits/<int:audit_id>", methods=["GET"])
+def api_get_audit(audit_id):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT a.audit_id, a.audit_number, a.location_id, l.name AS location_name,
+                       a.status, a.created_by, a.approved_by, a.created_at, a.completed_at
+                FROM code_management_audits a
+                JOIN locations l ON a.location_id = l.location_id
+                WHERE a.audit_id = %s
+            """, (audit_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"success": False, "message": f"Audit #{audit_id} not found."}), 404
+
+            cur.execute("""
+                SELECT ai.audit_item_id, ai.product_id, p.p_name, ai.batch_id, b.batch_number,
+                       b.expiry_date, ai.system_qty, ai.physical_qty, ai.discrepancy_qty, ai.remarks
+                FROM audit_items ai
+                JOIN Products p ON ai.product_id = p.product_id
+                JOIN batches b ON ai.batch_id = b.batch_id
+                WHERE ai.audit_id = %s
+            """, (audit_id,))
+            items = [
+                {
+                    "audit_item_id": r[0], "product_id": r[1], "product_name": r[2],
+                    "batch_id": r[3], "batch_number": r[4], "expiry_date": str(r[5]),
+                    "system_qty": r[6], "physical_qty": r[7], "discrepancy_qty": r[8], "remarks": r[9]
+                }
+                for r in cur.fetchall()
+            ]
+
+            audit_data = {
+                "audit_id": row[0], "audit_number": row[1], "location_id": row[2],
+                "location_name": row[3], "status": row[4], "created_by": row[5],
+                "approved_by": row[6], "created_at": str(row[7]), "items": items
+            }
+            return jsonify({"success": True, "audit": audit_data})
+    finally:
+        conn.close()
+
+
+@app.route("/api/audits/<int:audit_id>/submit", methods=["POST"])
+def api_submit_audit(audit_id):
+    data = request.get_json(silent=True) or {}
+    counts = data.get("counts", [])
+    user = session.get("username") or "store_executive"
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            res = submit_code_audit(cur, audit_id, counts, user)
+            conn.commit()
+            return jsonify({"success": True, "result": res})
+    except PolicyViolationError as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 400
+    finally:
+        conn.close()
+
+
+@app.route("/api/audits/<int:audit_id>/approve", methods=["POST"])
+@require_roles("admin", "store_supervisor")
+def api_approve_audit(audit_id):
+    user = session.get("username") or "supervisor"
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            res = approve_code_audit(cur, audit_id, user)
+            conn.commit()
+            return jsonify({"success": True, "approval": res})
+    except PolicyViolationError as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 400
+    finally:
+        conn.close()
+
+
+# -----------------------------------------------------------------------------
+# Near-Expiry Markdowns & Push Sale
+# -----------------------------------------------------------------------------
+@app.route("/api/markdowns/suggestions", methods=["GET"])
+def api_markdown_suggestions():
+    loc_id = request.args.get("location_id", type=int)
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            suggs = calculate_markdown_suggestions(cur, location_id=loc_id)
+            return jsonify({"success": True, "suggestions": suggs})
+    finally:
+        conn.close()
+
+
+@app.route("/api/markdowns/approve", methods=["POST"])
+@require_roles("admin", "store_supervisor", "category_manager")
+def api_approve_markdown_endpoint():
+    data = request.get_json(silent=True) or {}
+    loc_id = int(data.get("location_id") or 2)
+    pid = int(data["product_id"])
+    bid = int(data["batch_id"])
+    disc = float(data["approved_discount_percent"])
+    user = session.get("username") or "supervisor"
+    role = session.get("role") or request.headers.get("X-User-Role") or "store_supervisor"
+    notes = data.get("notes")
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            res = approve_markdown(cur, loc_id, pid, bid, disc, user, role, notes)
+            conn.commit()
+            return jsonify({"success": True, "markdown": res}), 201
+    except (PolicyViolationError, BatchValidationError) as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 400
+    finally:
+        conn.close()
+
+
+# -----------------------------------------------------------------------------
+# Vendor Expiry Returns, Scrap Ledger, and Debit Notes
+# -----------------------------------------------------------------------------
+@app.route("/api/returns/expiry/create", methods=["POST"])
+@require_roles("admin", "store_supervisor", "category_manager")
+def api_create_return():
+    data = request.get_json(silent=True) or {}
+    loc_id = int(data.get("location_id") or 2)
+    sup_id = int(data["supplier_id"])
+    pid = int(data["product_id"])
+    bid = int(data["batch_id"])
+    qty = int(data["quantity"])
+    reason = data.get("reason") or "Hit Supplier Expiry Return Window"
+    user = session.get("username") or "supervisor"
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            res = create_expiry_return(cur, loc_id, sup_id, pid, bid, qty, user, reason)
+            conn.commit()
+            return jsonify({"success": True, "return": res}), 201
+    except BatchValidationError as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 400
+    finally:
+        conn.close()
+
+
+@app.route("/api/returns/expiry/<int:ret_id>/post", methods=["POST"])
+@require_roles("admin", "store_supervisor", "category_manager")
+def api_post_return(ret_id):
+    user = session.get("username") or "supervisor"
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            res = post_expiry_return_atomic(cur, ret_id, user)
+            conn.commit()
+            return jsonify({"success": True, "result": res})
+    except (InsufficientStockError, PolicyViolationError, BatchValidationError) as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 400
+    finally:
+        conn.close()
+
+
+@app.route("/api/returns/expiry", methods=["GET"])
+def api_list_returns():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT r.return_id, r.return_number, l.name AS location_name, s.supplier_name,
+                       p.p_name, b.batch_number, r.quantity, r.unit_cost, r.total_claim_amount,
+                       r.status, r.posted_at, r.posted_by, r.created_at
+                FROM vendor_expiry_returns r
+                JOIN locations l ON r.location_id = l.location_id
+                JOIN suppliers s ON r.supplier_id = s.supplier_id
+                JOIN Products p ON r.product_id = p.product_id
+                JOIN batches b ON r.batch_id = b.batch_id
+                ORDER BY r.return_id DESC
+            """)
+            returns = [
+                {
+                    "return_id": r[0], "return_number": r[1], "location": r[2], "supplier": r[3],
+                    "product_name": r[4], "batch_number": r[5], "quantity": r[6], "unit_cost": float(r[7]),
+                    "total_claim_amount": float(r[8]), "status": r[9],
+                    "posted_at": str(r[10]) if r[10] else None, "posted_by": r[11], "created_at": str(r[12])
+                }
+                for r in cur.fetchall()
+            ]
+            return jsonify({"success": True, "returns": returns})
+    finally:
+        conn.close()
+
+
+@app.route("/api/debit-notes", methods=["GET"])
+def api_list_debit_notes():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT dn.debit_note_id, dn.debit_note_number, s.supplier_name, dn.issue_date,
+                       dn.taxable_amount, dn.gst_amount, dn.total_amount, dn.status, r.return_number
+                FROM debit_notes dn
+                JOIN suppliers s ON dn.supplier_id = s.supplier_id
+                JOIN vendor_expiry_returns r ON dn.return_id = r.return_id
+                ORDER BY dn.debit_note_id DESC
+            """)
+            notes = [
+                {
+                    "debit_note_id": r[0], "debit_note_number": r[1], "supplier_name": r[2],
+                    "issue_date": str(r[3]), "taxable_amount": float(r[4]), "gst_amount": float(r[5]),
+                    "total_amount": float(r[6]), "status": r[7], "return_number": r[8]
+                }
+                for r in cur.fetchall()
+            ]
+            return jsonify({"success": True, "debit_notes": notes})
+    finally:
+        conn.close()
+
+
+
+# -----------------------------------------------------------------------------
+# Phase 1 Foundation: Enterprise Policies, Supplier Terms, Roles & Audit Log
+# -----------------------------------------------------------------------------
+@app.route("/api/admin/policies", methods=["GET"])
+@require_roles("admin", "category_manager")
+def api_get_policies():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT policy_key, policy_value, description, updated_by, updated_at
+                FROM system_policies
+                ORDER BY policy_key ASC
+            """)
+            policies = [
+                {
+                    "policy_key": r[0],
+                    "policy_value": r[1],
+                    "description": r[2],
+                    "updated_by": r[3],
+                    "updated_at": str(r[4]) if r[4] else None
+                }
+                for r in cur.fetchall()
+            ]
+            return jsonify({"success": True, "policies": policies})
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/policies", methods=["PUT"])
+@require_roles("admin")
+def api_update_policy():
+    data = request.get_json(silent=True) or {}
+    key = data.get("policy_key", "").strip()
+    val = str(data.get("policy_value", "")).strip()
+
+    if not key or not val:
+        return jsonify({"success": False, "message": "policy_key and policy_value are required."}), 400
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            update_system_policy(cur, key, val, updated_by=g.username)
+            log_audit_event(
+                cur,
+                action_type="POLICY_UPDATE",
+                entity_type="SYSTEM_POLICY",
+                entity_id=key,
+                user_id=g.user_id,
+                username=g.username,
+                user_role=g.user_role,
+                store_id=g.user_store_id,
+                details={"policy_key": key, "new_value": val},
+                ip_address=request.remote_addr
+            )
+            conn.commit()
+            return jsonify({"success": True, "message": f"Policy '{key}' updated successfully."})
+    except BatchValidationError as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 400
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": f"Failed to update policy: {e}"}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/supplier-terms", methods=["GET"])
+@require_roles("admin", "category_manager", "accounts")
+def api_get_supplier_terms():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT supplier_id, supplier_name, gstin, contact_email, phone, expiry_return_window_days, created_at
+                FROM suppliers
+                ORDER BY supplier_name ASC
+            """)
+            suppliers = [
+                {
+                    "supplier_id": r[0],
+                    "supplier_name": r[1],
+                    "gstin": r[2],
+                    "contact_email": r[3],
+                    "phone": r[4],
+                    "expiry_return_window_days": r[5],
+                    "created_at": str(r[6]) if r[6] else None
+                }
+                for r in cur.fetchall()
+            ]
+            return jsonify({"success": True, "suppliers": suppliers})
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/supplier-terms/<int:supplier_id>", methods=["PUT"])
+@require_roles("admin", "category_manager")
+def api_update_supplier_terms(supplier_id):
+    data = request.get_json(silent=True) or {}
+    window_days = data.get("expiry_return_window_days")
+    contact_email = data.get("contact_email")
+    phone = data.get("phone")
+
+    if window_days is None or int(window_days) < 0:
+        return jsonify({"success": False, "message": "Valid non-negative expiry_return_window_days is required."}), 400
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE suppliers
+                SET expiry_return_window_days = %s,
+                    contact_email = COALESCE(%s, contact_email),
+                    phone = COALESCE(%s, phone)
+                WHERE supplier_id = %s
+            """, (int(window_days), contact_email, phone, supplier_id))
+            if cur.rowcount == 0:
+                conn.rollback()
+                return jsonify({"success": False, "message": f"Supplier #{supplier_id} not found."}), 404
+
+            log_audit_event(
+                cur,
+                action_type="SUPPLIER_TERMS_UPDATE",
+                entity_type="SUPPLIER",
+                entity_id=str(supplier_id),
+                user_id=g.user_id,
+                username=g.username,
+                user_role=g.user_role,
+                store_id=g.user_store_id,
+                details={"supplier_id": supplier_id, "expiry_return_window_days": int(window_days)},
+                ip_address=request.remote_addr
+            )
+            conn.commit()
+            return jsonify({"success": True, "message": "Supplier terms updated successfully."})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": f"Failed to update supplier terms: {e}"}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/roles", methods=["GET"])
+@require_roles("admin")
+def api_get_roles():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT u.user_id, u.username, u.role, u.store_id, l.name AS store_name, l.code AS store_code, u.created_at
+                FROM Users u
+                LEFT JOIN locations l ON u.store_id = l.location_id
+                ORDER BY u.user_id ASC
+            """)
+            users = [
+                {
+                    "user_id": r[0],
+                    "username": r[1],
+                    "role": r[2],
+                    "store_id": r[3],
+                    "store_name": r[4],
+                    "store_code": r[5],
+                    "created_at": str(r[6]) if r[6] else None
+                }
+                for r in cur.fetchall()
+            ]
+            return jsonify({"success": True, "users": users})
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/roles/<int:target_user_id>", methods=["PUT"])
+@require_roles("admin")
+def api_update_user_role(target_user_id):
+    data = request.get_json(silent=True) or {}
+    new_role = data.get("role")
+    new_store_id = data.get("store_id")
+
+    if new_role and new_role not in VALID_ROLES:
+        return jsonify({"success": False, "message": f"Invalid role '{new_role}'. Must be one of: {', '.join(VALID_ROLES)}"}), 400
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT username, role, store_id FROM Users WHERE user_id = %s", (target_user_id,))
+            target = cur.fetchone()
+            if not target:
+                return jsonify({"success": False, "message": f"User #{target_user_id} not found."}), 404
+
+            old_username, old_role, old_store = target
+            updated_role = new_role if new_role else old_role
+            updated_store = new_store_id if "store_id" in data else old_store
+
+            cur.execute("""
+                UPDATE Users
+                SET role = %s, store_id = %s
+                WHERE user_id = %s
+            """, (updated_role, updated_store, target_user_id))
+
+            log_audit_event(
+                cur,
+                action_type="USER_ROLE_SCOPING_UPDATE",
+                entity_type="USER",
+                entity_id=str(target_user_id),
+                user_id=g.user_id,
+                username=g.username,
+                user_role=g.user_role,
+                store_id=g.user_store_id,
+                details={
+                    "target_user_id": target_user_id,
+                    "target_username": old_username,
+                    "old_role": old_role,
+                    "new_role": updated_role,
+                    "old_store_id": old_store,
+                    "new_store_id": updated_store
+                },
+                ip_address=request.remote_addr
+            )
+            conn.commit()
+            return jsonify({"success": True, "message": f"User '{old_username}' permissions updated."})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": f"Failed to update user: {e}"}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/audit-log", methods=["GET"])
+@require_roles("admin", "category_manager")
+def api_get_audit_log():
+    limit = int(request.args.get("limit", 100))
+    offset = int(request.args.get("offset", 0))
+    action_type = request.args.get("action_type")
+    user_id = request.args.get("user_id")
+
+    query = """
+        SELECT sal.log_id, sal.action_type, sal.entity_type, sal.entity_id,
+               sal.user_id, sal.username, sal.user_role, sal.store_id, l.name AS store_name,
+               sal.details, sal.ip_address, sal.created_at
+        FROM system_audit_log sal
+        LEFT JOIN locations l ON sal.store_id = l.location_id
+        WHERE 1=1
+    """
+    params = []
+    if action_type:
+        query += " AND sal.action_type = %s"
+        params.append(action_type)
+    if user_id:
+        query += " AND sal.user_id = %s"
+        params.append(int(user_id))
+
+    query += " ORDER BY sal.log_id DESC LIMIT %s OFFSET %s"
+    params.extend([limit, offset])
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(params))
+            logs = [
+                {
+                    "log_id": r[0],
+                    "action_type": r[1],
+                    "entity_type": r[2],
+                    "entity_id": r[3],
+                    "user_id": r[4],
+                    "username": r[5],
+                    "user_role": r[6],
+                    "store_id": r[7],
+                    "store_name": r[8],
+                    "details": r[9],
+                    "ip_address": r[10],
+                    "created_at": str(r[11]) if r[11] else None
+                }
+                for r in cur.fetchall()
+            ]
+            return jsonify({"success": True, "audit_logs": logs})
+    finally:
+        conn.close()
+
 
 
 if __name__ == "__main__":

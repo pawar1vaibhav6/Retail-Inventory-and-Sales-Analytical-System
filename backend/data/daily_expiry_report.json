@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-10-22T18:43:36.806767",
+  "audit_date": "2026-10-22",
+  "expired_batches_flipped": 0,
+  "near_expiry_batches_flipped": 0,
+  "at_risk_windows": {
+    "30_days": {
+      "units": 0,
+      "value": 0.0
+    },
+    "60_days": {
+      "units": 0,
+      "value": 0.0
+    },
+    "90_days": {
+      "units": 0,
+      "value": 0.0
+    }
+  },
+  "dump_stock_count": 0,
+  "dump_stock_items": [],
+  "transfer_suggestions_count": 0,
+  "transfer_suggestions": []
+}
