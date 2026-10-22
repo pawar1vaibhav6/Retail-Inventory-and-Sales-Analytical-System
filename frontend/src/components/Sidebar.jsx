@@ -214,6 +214,78 @@ export default function Sidebar({ isOpen, onClose }) {
                 </>
               )}
 
+              {/* Phase 2: Batch Stock & Logistics */}
+              {(isAdmin || role === "warehouse_picker" || role === "category_manager" || role === "store_supervisor" || role === "store_executive") && (
+                <>
+                  <div
+                    className="sidebar-section-label"
+                    style={{ marginTop: "0.85rem" }}
+                  >
+                    Batch Stock &amp; Logistics
+                  </div>
+                  {(isAdmin || role === "warehouse_picker") && (
+                    <NavLink
+                      to="/grn/inward"
+                      onClick={handleLinkClick}
+                      className={({ isActive }) =>
+                        `sidebar-nav-item ${isActive ? "active" : ""}`
+                      }
+                    >
+                      <i className="fa-solid fa-truck-ramp-box" />
+                      <span>DC GRN Inward</span>
+                    </NavLink>
+                  )}
+                  {(isAdmin || role === "category_manager" || role === "store_supervisor" || role === "store_executive") && (
+                    <NavLink
+                      to="/inventory/batches"
+                      onClick={handleLinkClick}
+                      className={({ isActive }) =>
+                        `sidebar-nav-item ${isActive ? "active" : ""}`
+                      }
+                    >
+                      <i className="fa-solid fa-layer-group" />
+                      <span>Batch Ledger</span>
+                    </NavLink>
+                  )}
+                  {(isAdmin || role === "category_manager" || role === "store_supervisor" || role === "warehouse_picker") && (
+                    <NavLink
+                      to="/inventory/traceability"
+                      onClick={handleLinkClick}
+                      className={({ isActive }) =>
+                        `sidebar-nav-item ${isActive ? "active" : ""}`
+                      }
+                    >
+                      <i className="fa-solid fa-route" />
+                      <span>Traceability</span>
+                    </NavLink>
+                  )}
+                  {(isAdmin || role === "store_supervisor" || role === "category_manager" || role === "store_executive") && (
+                    <NavLink
+                      to="/replenishment/requests"
+                      onClick={handleLinkClick}
+                      className={({ isActive }) =>
+                        `sidebar-nav-item ${isActive ? "active" : ""}`
+                      }
+                    >
+                      <i className="fa-solid fa-boxes-packing" />
+                      <span>Replenishment</span>
+                    </NavLink>
+                  )}
+                  {(isAdmin || role === "warehouse_picker") && (
+                    <NavLink
+                      to="/replenishment/picking"
+                      onClick={handleLinkClick}
+                      className={({ isActive }) =>
+                        `sidebar-nav-item ${isActive ? "active" : ""}`
+                      }
+                    >
+                      <i className="fa-solid fa-list-check" />
+                      <span>FEFO Pick List</span>
+                    </NavLink>
+                  )}
+                </>
+              )}
+
               {/* Phase 1 Enterprise & Governance */}
               {(isAdmin || role === "category_manager" || role === "accounts") && (
                 <>

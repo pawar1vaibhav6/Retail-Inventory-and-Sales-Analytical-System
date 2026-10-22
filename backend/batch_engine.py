@@ -433,11 +433,21 @@ def process_replenishment_allocation(cur, replenishment_id: int, allocated_by: s
     cur.execute("SELECT item_id, product_id, requested_qty FROM replenishment_items WHERE replenishment_id = %s", (replenishment_id,))
     req_items = cur.fetchall()
 
+    # Normalize overrides (supports dict or list of dicts)
+    ovr_map = {}
+    if isinstance(overrides, list):
+        for o in overrides:
+            if isinstance(o, dict):
+                k = o.get("product_id") or o.get("item_id")
+                if k is not None:
+                    ovr_map[k] = o
+    elif isinstance(overrides, dict):
+        ovr_map = overrides
+
     pick_list = []
     for item_id, pid, req_qty in req_items:
-        # Check override if supplied
-        ovr = (overrides or {}).get(pid, {})
-        ovr_batch_id = ovr.get("batch_id")
+        ovr = ovr_map.get(pid) or ovr_map.get(item_id) or {}
+        ovr_batch_id = ovr.get("override_batch_id") or ovr.get("batch_id")
         ovr_reason = ovr.get("reason")
 
         allocs = allocate_fefo(

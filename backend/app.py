@@ -1445,6 +1445,7 @@ def api_suppliers():
 # Distribution Center Goods Received Note (GRN) Inwarding
 # -----------------------------------------------------------------------------
 @app.route("/api/grn", methods=["GET", "POST"])
+@app.route("/api/grn/receipts", methods=["GET", "POST"])
 @require_roles("admin", "warehouse_picker")
 def api_grn():
     conn = get_connection()
@@ -1525,6 +1526,7 @@ def api_create_replenishment():
 
 
 @app.route("/api/replenishment/<int:rep_id>/allocate-fefo", methods=["POST"])
+@app.route("/api/replenishment/<int:rep_id>/allocate", methods=["POST"])
 @require_roles("admin", "warehouse_picker")
 def api_allocate_fefo_endpoint(rep_id):
     data = request.get_json(silent=True) or {}
@@ -1549,6 +1551,7 @@ def api_allocate_fefo_endpoint(rep_id):
 
 
 @app.route("/api/replenishment/<int:rep_id>/pick", methods=["POST"])
+@app.route("/api/replenishment/<int:rep_id>/dispatch", methods=["POST"])
 @require_roles("admin", "warehouse_picker")
 def api_pick_replenishment(rep_id):
     picker = session.get("username") or "picker"
@@ -1582,27 +1585,94 @@ def api_receive_replenishment(rep_id):
         conn.close()
 
 
-@app.route("/api/replenishment", methods=["GET"])
-def api_list_replenishments():
+@app.route("/api/replenishment/<int:rep_id>", methods=["GET"])
+def api_get_replenishment_detail(rep_id):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             cur.execute("""
+                SELECT r.replenishment_id, r.request_number, r.from_location_id, lf.name AS from_loc,
+                       r.to_location_id, lt.name AS to_loc, r.status, r.requested_by, r.allocated_by, r.created_at
+                FROM store_replenishments r
+                JOIN locations lf ON r.from_location_id = lf.location_id
+                JOIN locations lt ON r.to_location_id = lt.location_id
+                WHERE r.replenishment_id = %s
+            """, (rep_id,))
+            rep = cur.fetchone()
+            if not rep:
+                return jsonify({"success": False, "message": "Replenishment request not found."}), 404
+
+            cur.execute("""
+                SELECT ri.item_id, ri.product_id, p.p_name, ri.requested_qty,
+                       ri.allocated_batch_id, ri.allocated_batch_number, ri.expiry_date,
+                       ri.allocated_qty, ri.picked_qty, ri.is_override, ri.override_reason, ri.override_approved_by
+                FROM replenishment_items ri
+                JOIN Products p ON ri.product_id = p.product_id
+                WHERE ri.replenishment_id = %s
+                ORDER BY ri.item_id ASC
+            """, (rep_id,))
+            items = [
+                {
+                    "item_id": r[0], "product_id": r[1], "product_name": r[2], "requested_qty": r[3],
+                    "allocated_batch_id": r[4], "allocated_batch_number": r[5],
+                    "expiry_date": str(r[6]) if r[6] else None, "allocated_qty": r[7], "picked_qty": r[8],
+                    "is_override": bool(r[9]), "override_reason": r[10], "override_approved_by": r[11]
+                }
+                for r in cur.fetchall()
+            ]
+
+            data = {
+                "replenishment_id": rep[0], "request_number": rep[1], "from_location_id": rep[2],
+                "from_location": rep[3], "to_location_id": rep[4], "to_location": rep[5],
+                "status": rep[6], "requested_by": rep[7], "allocated_by": rep[8],
+                "created_at": str(rep[9]), "items": items
+            }
+            return jsonify({"success": True, "replenishment": data})
+    finally:
+        conn.close()
+
+
+@app.route("/api/replenishment", methods=["GET"])
+@app.route("/api/replenishment/requests", methods=["GET"])
+def api_list_replenishments():
+    user_role = session.get("role") or request.headers.get("X-User-Role")
+    user_store_id = session.get("store_id")
+    if user_store_id is None and request.headers.get("X-Store-Id"):
+        try:
+            user_store_id = int(request.headers.get("X-Store-Id"))
+        except (ValueError, TypeError):
+            pass
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            query = """
                 SELECT r.replenishment_id, r.request_number, lf.name AS from_loc, lt.name AS to_loc,
                        r.status, r.requested_by, r.allocated_by, r.created_at,
-                       COUNT(ri.item_id) AS total_items, COALESCE(SUM(ri.requested_qty), 0) AS total_requested
+                       COUNT(ri.item_id) AS total_items, COALESCE(SUM(ri.requested_qty), 0) AS total_requested,
+                       r.to_location_id
                 FROM store_replenishments r
                 JOIN locations lf ON r.from_location_id = lf.location_id
                 JOIN locations lt ON r.to_location_id = lt.location_id
                 LEFT JOIN replenishment_items ri ON r.replenishment_id = ri.replenishment_id
-                GROUP BY r.replenishment_id, r.request_number, lf.name, lt.name, r.status, r.requested_by, r.allocated_by, r.created_at
+                WHERE 1=1
+            """
+            params = []
+            if user_role in ("store_supervisor", "store_executive", "cashier") and user_store_id:
+                query += " AND r.to_location_id = %s"
+                params.append(user_store_id)
+
+            query += """
+                GROUP BY r.replenishment_id, r.request_number, lf.name, lt.name, r.status, r.requested_by, r.allocated_by, r.created_at, r.to_location_id
                 ORDER BY r.replenishment_id DESC
-            """)
+            """
+            cur.execute(query, tuple(params))
             orders = [
                 {
                     "replenishment_id": r[0], "request_number": r[1], "from_location": r[2],
                     "to_location": r[3], "status": r[4], "requested_by": r[5], "allocated_by": r[6],
-                    "created_at": str(r[7]), "total_items": r[8], "total_requested": r[9]
+                    "created_at": str(r[7]), "total_items": r[8], "total_requested": r[9],
+                    "to_location_id": r[10]
                 }
                 for r in cur.fetchall()
             ]
@@ -1615,6 +1685,7 @@ def api_list_replenishments():
 # Batch Master & Full End-to-End Traceability Query
 # -----------------------------------------------------------------------------
 @app.route("/api/batches/traceability/<batch_number>", methods=["GET"])
+@app.route("/api/traceability/batch/<batch_number>", methods=["GET"])
 def api_trace_batch(batch_number):
     conn = get_connection()
     try:
@@ -1628,10 +1699,25 @@ def api_trace_batch(batch_number):
 
 
 @app.route("/api/batches", methods=["GET"])
+@app.route("/api/batch-stock", methods=["GET"])
 def api_list_batches():
     pid = request.args.get("product_id", type=int)
     loc_id = request.args.get("location_id", type=int)
     status = request.args.get("status")
+
+    # Enforce store scoping if user is store-bound
+    user_role = session.get("role") or request.headers.get("X-User-Role")
+    user_store_id = session.get("store_id")
+    if user_store_id is None and request.headers.get("X-Store-Id"):
+        try:
+            user_store_id = int(request.headers.get("X-Store-Id"))
+        except (ValueError, TypeError):
+            pass
+
+    if user_role in ("store_supervisor", "store_executive", "cashier") and user_store_id:
+        loc_id = user_store_id
+    elif user_role == "warehouse_picker" and user_store_id:
+        loc_id = user_store_id
 
     conn = get_connection()
     try:
@@ -1643,7 +1729,9 @@ def api_list_batches():
                        COALESCE(bs.quantity_saleable, 0) AS saleable,
                        COALESCE(bs.quantity_reserved, 0) AS reserved,
                        COALESCE(bs.quantity_scrap, 0) AS scrap,
-                       COALESCE(l.name, 'All Locations') AS location_name
+                       COALESCE(l.name, 'All Locations') AS location_name,
+                       bs.location_id,
+                       l.code AS location_code
                 FROM batches b
                 JOIN Products p ON b.product_id = p.product_id
                 LEFT JOIN batch_stock bs ON b.batch_id = bs.batch_id
@@ -1669,7 +1757,8 @@ def api_list_batches():
                     "batch_number": r[3], "mfg_date": str(r[4]), "expiry_date": str(r[5]),
                     "days_to_expiry": r[6], "cost_price": float(r[7]), "mrp": float(r[8]),
                     "status": r[9], "quantity_saleable": r[10], "quantity_reserved": r[11],
-                    "quantity_scrap": r[12], "location_name": r[13]
+                    "quantity_scrap": r[12], "location_name": r[13],
+                    "location_id": r[14], "location_code": r[15]
                 }
                 for r in cur.fetchall()
             ]

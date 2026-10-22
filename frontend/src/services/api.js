@@ -251,6 +251,64 @@ export const adminAPI = {
   }
 };
 
+// -----------------------------------------------------------------------------
+// Phase 2: Batch Stock & GRN Inward API
+// -----------------------------------------------------------------------------
+export const batchAPI = {
+  recordGRN: async (grnData) => {
+    return request('/api/grn/receipts', {
+      method: 'POST',
+      body: JSON.stringify(grnData)
+    });
+  },
+  getGRNReceipts: async () => {
+    return request('/api/grn/receipts');
+  },
+  getBatchStock: async (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/api/batch-stock${qs ? `?${qs}` : ''}`);
+  },
+  getTraceability: async (batchNumber) => {
+    return request(`/api/traceability/batch/${encodeURIComponent(batchNumber)}`);
+  }
+};
+
+// -----------------------------------------------------------------------------
+// Phase 3: FEFO Allocation & Store Replenishment API
+// -----------------------------------------------------------------------------
+export const replenishmentAPI = {
+  createRequest: async (payload) => {
+    return request('/api/replenishment/request', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  },
+  getRequests: async (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/api/replenishment/requests${qs ? `?${qs}` : ''}`);
+  },
+  getRequestDetail: async (requestId) => {
+    return request(`/api/replenishment/${requestId}`);
+  },
+  allocateRequest: async (requestId, payload = {}) => {
+    return request(`/api/replenishment/${requestId}/allocate`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  },
+  dispatchTransfer: async (requestId, payload = {}) => {
+    return request(`/api/replenishment/${requestId}/dispatch`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  },
+  receiveAtStore: async (requestId) => {
+    return request(`/api/replenishment/${requestId}/receive`, {
+      method: 'POST'
+    });
+  }
+};
+
 export default {
   auth: authAPI,
   dashboard: dashboardAPI,
@@ -260,5 +318,7 @@ export default {
   orders: ordersAPI,
   analytics: analyticsAPI,
   charts: chartsAPI,
-  admin: adminAPI
+  admin: adminAPI,
+  batch: batchAPI,
+  replenishment: replenishmentAPI
 };

@@ -17,6 +17,15 @@ import SupplierTerms from './pages/SupplierTerms';
 import RolesPermissions from './pages/RolesPermissions';
 import AuditLog from './pages/AuditLog';
 
+// Phase 2 Batch Stock Pages
+import GRNInward from './pages/GRNInward';
+import BatchStockLedger from './pages/BatchStockLedger';
+import BatchTraceability from './pages/BatchTraceability';
+
+// Phase 3 FEFO & Replenishment Pages
+import ReplenishmentRequests from './pages/ReplenishmentRequests';
+import FEFOPickList from './pages/FEFOPickList';
+
 function ProtectedRoute({ children, adminOnly = false, allowedRoles = [] }) {
   const { user } = useAuth();
 
@@ -85,6 +94,50 @@ export default function App() {
             element={
               <ProtectedRoute adminOnly>
                 <Charts />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Phase 3 FEFO & Replenishment Pages */}
+          <Route
+            path="replenishment/requests"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'store_supervisor', 'store_executive', 'category_manager']}>
+                <ReplenishmentRequests />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="replenishment/picking"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'warehouse_picker']}>
+                <FEFOPickList />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Phase 2 Batch Stock Pages */}
+          <Route
+            path="grn/inward"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'warehouse_picker']}>
+                <GRNInward />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="inventory/batches"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'category_manager', 'store_supervisor', 'store_executive']}>
+                <BatchStockLedger />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="inventory/traceability"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'category_manager', 'store_supervisor', 'warehouse_picker']}>
+                <BatchTraceability />
               </ProtectedRoute>
             }
           />
