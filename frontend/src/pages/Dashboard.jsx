@@ -2,17 +2,24 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useStore } from '../context/StoreContext';
-import { dashboardAPI } from '../services/api';
+import { dashboardAPI, enterpriseAnalyticsAPI } from '../services/api';
 
 export default function Dashboard() {
   const { user } = useAuth();
   const { products, customers, orders } = useStore();
   const [serverStats, setServerStats] = useState(null);
+  const [roleMetrics, setRoleMetrics] = useState(null);
 
   useEffect(() => {
     dashboardAPI.getStats()
       .then((data) => setServerStats(data))
       .catch((err) => console.warn('[Dashboard] Could not load server stats:', err));
+
+    enterpriseAnalyticsAPI.getRoleMetrics()
+      .then((res) => {
+        if (res && res.metrics) setRoleMetrics(res.metrics);
+      })
+      .catch((err) => console.warn('[Dashboard] Could not load role metrics:', err));
   }, []);
 
   const lowStockItems = serverStats && serverStats.low_stock_items && serverStats.low_stock_items.length > 0
@@ -100,6 +107,140 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Role-Scoped Enterprise Batch & Expiry Command Center (Phase 6) */}
+      {roleMetrics && (
+        <div className="mb-4">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <h4 style={{ margin: 0, fontWeight: 700, fontSize: '1.15rem' }}>
+              <i className="fa-solid fa-layer-group text-primary me-2" />
+              Batch &amp; Expiry Control Center
+              <span className="badge bg-secondary ms-2" style={{ fontSize: '11px', textTransform: 'uppercase' }}>
+                {roleMetrics.role.replace('_', ' ')} {roleMetrics.store_id ? `(Store #${roleMetrics.store_id})` : '(Chain-wide)'}
+              </span>
+            </h4>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <Link to="/inventory/expiry-report" className="btn btn-sm btn-outline-primary" style={{ fontSize: '12px' }}>
+                <i className="fa-solid fa-file-excel me-1" /> Expiry Report
+              </Link>
+              <Link to="/approvals" className="btn btn-sm btn-outline-warning text-dark" style={{ fontSize: '12px' }}>
+                <i className="fa-solid fa-inbox me-1" /> Approvals ({roleMetrics.pending_approvals_count})
+              </Link>
+            </div>
+          </div>
+
+          <div className="row g-3">
+            {/* 1. Near Expiry Stock Value */}
+            <div className="col-md-3">
+              <Link to="/inventory/expiry-report" className="card shadow-sm border-0 text-decoration-none h-100" style={{ borderRadius: '10px', background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.08), rgba(239, 68, 68, 0.02))', borderLeft: '4px solid #ef4444' }}>
+                <div className="card-body p-3">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <span className="text-muted font-bold" style={{ fontSize: '12px' }}>NEAR-EXPIRY VALUE (&lt;=30D)</span>
+                    <i className="fa-solid fa-hourglass-half text-danger" />
+                  </div>
+                  <h3 style={{ margin: '0.5rem 0', fontWeight: 700, color: '#dc2626' }}>
+                    ₹{roleMetrics.near_expiry_30d_value?.toLocaleString('en-IN')}
+                  </h3>
+                  <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                    <span>60d: ₹{roleMetrics.near_expiry_60d_value?.toLocaleString('en-IN')}</span> &bull; <span>90d: ₹{roleMetrics.near_expiry_90d_value?.toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+              </Link>
+            </div>
+
+            {/* 2. Pending Approvals */}
+            <div className="col-md-3">
+              <Link to="/approvals" className="card shadow-sm border-0 text-decoration-none h-100" style={{ borderRadius: '10px', background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(245, 158, 11, 0.02))', borderLeft: '4px solid #f59e0b' }}>
+                <div className="card-body p-3">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <span className="text-muted font-bold" style={{ fontSize: '12px' }}>PENDING GOVERNANCE</span>
+                    <i className="fa-solid fa-shield-halved text-warning" />
+                  </div>
+                  <h3 style={{ margin: '0.5rem 0', fontWeight: 700, color: '#d97706' }}>
+                    {roleMetrics.pending_approvals_count}
+                  </h3>
+                  <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                    Audits, Markdowns &amp; Return Claims
+                  </div>
+                </div>
+              </Link>
+            </div>
+
+            {/* 3. Monthly Scrap Loss */}
+            <div className="col-md-3">
+              <Link to="/store-ops/scrap-ledger" className="card shadow-sm border-0 text-decoration-none h-100" style={{ borderRadius: '10px', background: 'linear-gradient(135deg, rgba(107, 114, 128, 0.08), rgba(107, 114, 128, 0.02))', borderLeft: '4px solid #6b7280' }}>
+                <div className="card-body p-3">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <span className="text-muted font-bold" style={{ fontSize: '12px' }}>SCRAP LEDGER VALUE</span>
+                    <i className="fa-solid fa-dumpster text-secondary" />
+                  </div>
+                  <h3 style={{ margin: '0.5rem 0', fontWeight: 700, color: '#4b5563' }}>
+                    ₹{roleMetrics.scrap_month_value?.toLocaleString('en-IN')}
+                  </h3>
+                  <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                    Non-saleable Damaged/Expired Stock
+                  </div>
+                </div>
+              </Link>
+            </div>
+
+            {/* 4. Push Sale Sell-Through */}
+            <div className="col-md-3">
+              <Link to="/store-ops/markdowns" className="card shadow-sm border-0 text-decoration-none h-100" style={{ borderRadius: '10px', background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(16, 185, 129, 0.02))', borderLeft: '4px solid #10b981' }}>
+                <div className="card-body p-3">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <span className="text-muted font-bold" style={{ fontSize: '12px' }}>PUSH SALE SELL-THROUGH</span>
+                    <i className="fa-solid fa-tags text-success" />
+                  </div>
+                  <h3 style={{ margin: '0.5rem 0', fontWeight: 700, color: '#059669' }}>
+                    {roleMetrics.push_sale_sell_through_pct}%
+                  </h3>
+                  <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                    Markdown Promotion Liquidation Rate
+                  </div>
+                </div>
+              </Link>
+            </div>
+
+            {/* 5. Role-Specific Supplemental Cards */}
+            {(roleMetrics.role === 'accounts' || roleMetrics.role === 'admin') && (
+              <div className="col-md-6">
+                <Link to="/finance/debit-notes" className="card shadow-sm border-0 text-decoration-none" style={{ borderRadius: '10px', borderLeft: '4px solid #6366f1', background: '#f8fafc' }}>
+                  <div className="card-body p-3" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div className="text-muted font-bold" style={{ fontSize: '12px' }}>VENDOR DEBIT NOTES RECONCILIATION</div>
+                      <h4 style={{ margin: '0.25rem 0 0', fontWeight: 700, color: '#4f46e5' }}>
+                        ₹{roleMetrics.open_debit_notes_amount?.toLocaleString('en-IN')} <span style={{ fontSize: '13px', fontWeight: 500, color: '#64748b' }}>({roleMetrics.open_debit_notes_count} open debit notes)</span>
+                      </h4>
+                    </div>
+                    <span className="btn btn-sm btn-outline-indigo" style={{ fontSize: '12px', border: '1px solid #6366f1', color: '#6366f1' }}>
+                      Reconcile <i className="fa-solid fa-arrow-right ms-1" />
+                    </span>
+                  </div>
+                </Link>
+              </div>
+            )}
+
+            {(roleMetrics.role === 'warehouse_picker' || roleMetrics.role === 'admin') && (
+              <div className="col-md-6">
+                <Link to="/inventory/pick-list" className="card shadow-sm border-0 text-decoration-none" style={{ borderRadius: '10px', borderLeft: '4px solid #0284c7', background: '#f8fafc' }}>
+                  <div className="card-body p-3" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div className="text-muted font-bold" style={{ fontSize: '12px' }}>CENTRAL DC PENDING FEFO PICKS</div>
+                      <h4 style={{ margin: '0.25rem 0 0', fontWeight: 700, color: '#0284c7' }}>
+                        {roleMetrics.dc_pending_picks_count} Orders Awaiting Pick &amp; Dispatch
+                      </h4>
+                    </div>
+                    <span className="btn btn-sm btn-outline-primary" style={{ fontSize: '12px' }}>
+                      Pick FEFO <i className="fa-solid fa-arrow-right ms-1" />
+                    </span>
+                  </div>
+                </Link>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Content Sections: Split Grid */}
       <div className="dashboard-grid">

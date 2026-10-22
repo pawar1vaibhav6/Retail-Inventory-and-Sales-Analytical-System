@@ -465,6 +465,18 @@ export default function Sidebar({ isOpen, onClose }) {
                       <span>Audit Log</span>
                     </NavLink>
                   )}
+                  {(isAdmin || role === "category_manager" || role === "store_supervisor") && (
+                    <NavLink
+                      to="/settings/notifications"
+                      onClick={handleLinkClick}
+                      className={({ isActive }) =>
+                        `sidebar-nav-item ${isActive ? "active" : ""}`
+                      }
+                    >
+                      <i className="fa-solid fa-bell" />
+                      <span>Notifications &amp; Alerts</span>
+                    </NavLink>
+                  )}
                 </>
               )}
             </nav>

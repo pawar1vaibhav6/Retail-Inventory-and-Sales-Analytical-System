@@ -1584,3 +1584,327 @@ def validate_batch_for_pos(cur, product_id: int, batch_id: Optional[int], qty: i
         except InsufficientStockError as e:
             return {"valid": False, "reason": str(e)}
 
+
+# -----------------------------------------------------------------------------
+# Enterprise Analytics & Role-Based Dashboard Metrics (Phase 6)
+# -----------------------------------------------------------------------------
+def get_expiry_ageing_summary(cur, location_id: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Computes inventory stock ageing buckets:
+    - 0-30 days (Urgent Near-Expiry)
+    - 31-60 days (Medium Risk)
+    - 61-90 days (Watchlist)
+    - > 90 days (Healthy / Long Shelf-Life)
+    """
+    params = []
+    loc_filter = ""
+    if location_id is not None:
+        loc_filter = "AND bs.location_id = %s"
+        params.append(location_id)
+
+    query = f"""
+        SELECT 
+            CASE 
+                WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 30 THEN '0_30'
+                WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 60 THEN '31_60'
+                WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 90 THEN '61_90'
+                ELSE 'OVER_90'
+            END AS bucket,
+            COUNT(DISTINCT b.batch_id) AS batch_count,
+            COALESCE(SUM(bs.quantity_saleable), 0) AS total_units,
+            COALESCE(SUM(bs.quantity_saleable * b.cost_price), 0.0) AS total_cost_value,
+            COALESCE(SUM(bs.quantity_saleable * b.mrp), 0.0) AS total_retail_value
+        FROM batch_stock bs
+        JOIN batches b ON bs.batch_id = b.batch_id
+        WHERE bs.quantity_saleable > 0
+          AND b.status = 'ACTIVE'
+          AND b.expiry_date >= CURDATE()
+          {loc_filter}
+        GROUP BY bucket
+    """
+    cur.execute(query, params)
+    rows = cur.fetchall()
+
+    buckets = {
+        "0_30": {"label": "0 - 30 Days (Urgent)", "batch_count": 0, "total_units": 0, "cost_value": 0.0, "retail_value": 0.0},
+        "31_60": {"label": "31 - 60 Days (Medium Risk)", "batch_count": 0, "total_units": 0, "cost_value": 0.0, "retail_value": 0.0},
+        "61_90": {"label": "61 - 90 Days (Watchlist)", "batch_count": 0, "total_units": 0, "cost_value": 0.0, "retail_value": 0.0},
+        "OVER_90": {"label": "> 90 Days (Healthy)", "batch_count": 0, "total_units": 0, "cost_value": 0.0, "retail_value": 0.0},
+    }
+    total_cost = 0.0
+    total_units = 0
+
+    for r in rows:
+        b_key = r[0]
+        if b_key in buckets:
+            buckets[b_key]["batch_count"] = int(r[1])
+            buckets[b_key]["total_units"] = int(r[2])
+            buckets[b_key]["cost_value"] = round(float(r[3]), 2)
+            buckets[b_key]["retail_value"] = round(float(r[4]), 2)
+            total_cost += float(r[3])
+            total_units += int(r[2])
+
+    return {
+        "buckets": buckets,
+        "total_cost_value": round(total_cost, 2),
+        "total_units": total_units
+    }
+
+
+def get_scrap_loss_trend(cur, location_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Summarizes current scrap ledger grouped by product category and location.
+    """
+    params = []
+    loc_filter = ""
+    if location_id is not None:
+        loc_filter = "AND bs.location_id = %s"
+        params.append(location_id)
+
+    query = f"""
+        SELECT 
+            p.category,
+            COUNT(DISTINCT bs.batch_id) AS scrap_batches,
+            COALESCE(SUM(bs.quantity_scrap), 0) AS scrap_units,
+            COALESCE(SUM(bs.quantity_scrap * b.cost_price), 0.0) AS scrap_cost_value
+        FROM batch_stock bs
+        JOIN Products p ON bs.product_id = p.product_id
+        JOIN batches b ON bs.batch_id = b.batch_id
+        WHERE bs.quantity_scrap > 0
+          {loc_filter}
+        GROUP BY p.category
+        ORDER BY scrap_cost_value DESC
+    """
+    cur.execute(query, params)
+    rows = cur.fetchall()
+    return [
+        {
+            "category": r[0] or "General",
+            "scrap_batches": int(r[1]),
+            "scrap_units": int(r[2]),
+            "scrap_cost_value": round(float(r[3]), 2)
+        }
+        for r in rows
+    ]
+
+
+def get_markdown_sellthrough_analytics(cur, location_id: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Aggregates markdown promotional campaign performance and sell-through rates.
+    """
+    params = []
+    loc_filter = ""
+    if location_id is not None:
+        loc_filter = "AND m.location_id = %s"
+        params.append(location_id)
+
+    query = f"""
+        SELECT 
+            COUNT(m.markdown_id) AS total_promotions,
+            COALESCE(SUM(t.units_initially_marked_down), 0) AS total_units_marked_down,
+            COALESCE(SUM(t.units_sold), 0) AS total_units_sold,
+            COALESCE(SUM(t.revenue_generated), 0.0) AS total_revenue,
+            COALESCE(AVG(m.approved_discount_percent), 0.0) AS avg_discount_pct
+        FROM markdown_promotions m
+        LEFT JOIN markdown_sales_tracking t ON m.markdown_id = t.markdown_id
+        WHERE 1=1 {loc_filter}
+    """
+    cur.execute(query, params)
+    row = cur.fetchone()
+    total_promos = int(row[0]) if row and row[0] else 0
+    init_units = int(row[1]) if row and row[1] else 0
+    sold_units = int(row[2]) if row and row[2] else 0
+    revenue = float(row[3]) if row and row[3] else 0.0
+    avg_disc = float(row[4]) if row and row[4] else 0.0
+
+    sell_through_rate = round((sold_units / init_units * 100), 1) if init_units > 0 else 0.0
+
+    return {
+        "total_promotions": total_promos,
+        "total_units_marked_down": init_units,
+        "total_units_sold": sold_units,
+        "total_revenue": round(revenue, 2),
+        "avg_discount_percent": round(avg_disc, 1),
+        "sell_through_percent": sell_through_rate
+    }
+
+
+def get_supplier_return_rate_analytics(cur) -> List[Dict[str, Any]]:
+    """
+    Computes the supplier return rate = (total returned claim units / total inwarded GRN units) * 100.
+    """
+    cur.execute("""
+        SELECT gr.supplier_id, s.supplier_name, COALESCE(SUM(gi.received_qty), 0) AS inward_units
+        FROM grn_receipts gr
+        JOIN suppliers s ON gr.supplier_id = s.supplier_id
+        JOIN grn_items gi ON gr.grn_id = gi.grn_id
+        GROUP BY gr.supplier_id, s.supplier_name
+    """)
+    inward_map = {r[0]: {"supplier_name": r[1], "inward_units": int(r[2]), "return_units": 0, "claim_amount": 0.0} for r in cur.fetchall()}
+
+    cur.execute("""
+        SELECT r.supplier_id, s.supplier_name, 
+               COALESCE(SUM(r.quantity), 0) AS return_units,
+               COALESCE(SUM(r.total_claim_amount), 0.0) AS claim_amount
+        FROM vendor_expiry_returns r
+        JOIN suppliers s ON r.supplier_id = s.supplier_id
+        WHERE r.status = 'POSTED'
+        GROUP BY r.supplier_id, s.supplier_name
+    """)
+    for r in cur.fetchall():
+        sid = r[0]
+        sname = r[1]
+        ret_units = int(r[2])
+        claim_amt = float(r[3])
+        if sid in inward_map:
+            inward_map[sid]["return_units"] = ret_units
+            inward_map[sid]["claim_amount"] = claim_amt
+        else:
+            inward_map[sid] = {"supplier_name": sname, "inward_units": 0, "return_units": ret_units, "claim_amount": claim_amt}
+
+    results = []
+    for sid, data in inward_map.items():
+        inw = data["inward_units"]
+        ret = data["return_units"]
+        rate = round((ret / inw * 100), 2) if inw > 0 else 0.0
+        results.append({
+            "supplier_id": sid,
+            "supplier_name": data["supplier_name"],
+            "inward_units": inw,
+            "return_units": ret,
+            "return_rate_pct": rate,
+            "claim_amount": round(data["claim_amount"], 2)
+        })
+
+    results.sort(key=lambda x: x["return_rate_pct"], reverse=True)
+    return results
+
+
+def get_fefo_override_analytics(cur) -> List[Dict[str, Any]]:
+    """
+    Computes FEFO override rate per fulfillment location (DC/Store).
+    """
+    cur.execute("""
+        SELECT 
+            sr.from_location_id,
+            l.name AS location_name,
+            COUNT(ri.item_id) AS total_allocations,
+            COALESCE(SUM(CASE WHEN ri.is_override = 1 THEN 1 ELSE 0 END), 0) AS override_count
+        FROM replenishment_items ri
+        JOIN store_replenishments sr ON ri.replenishment_id = sr.replenishment_id
+        JOIN locations l ON sr.from_location_id = l.location_id
+        WHERE ri.allocated_qty > 0
+        GROUP BY sr.from_location_id, l.name
+    """)
+    rows = cur.fetchall()
+    results = []
+    for r in rows:
+        tot = int(r[2])
+        ovr = int(r[3])
+        pct = round((ovr / tot * 100), 2) if tot > 0 else 0.0
+        results.append({
+            "location_id": r[0],
+            "location_name": r[1],
+            "total_allocations": tot,
+            "override_count": ovr,
+            "override_rate_pct": pct
+        })
+    return results
+
+
+def get_role_dashboard_metrics(cur, user_role: str, user_store_id: Optional[int] = None, username: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Aggregates role-specific KPIs according to DMart-style hierarchy and store scoping.
+    """
+    metrics = {
+        "role": user_role,
+        "store_id": user_store_id,
+        "near_expiry_30d_value": 0.0,
+        "near_expiry_60d_value": 0.0,
+        "near_expiry_90d_value": 0.0,
+        "scrap_month_value": 0.0,
+        "push_sale_sell_through_pct": 0.0,
+        "pending_approvals_count": 0,
+        "open_debit_notes_count": 0,
+        "open_debit_notes_amount": 0.0,
+        "dc_pending_picks_count": 0,
+        "active_audit_tasks_count": 0,
+    }
+
+    # 1. Scoped Expiry Values
+    loc_clause = ""
+    params_exp = []
+    if user_role in ("store_supervisor", "store_executive", "cashier"):
+        loc_clause = "AND bs.location_id = %s"
+        params_exp.append(user_store_id or 2)
+
+    cur.execute(f"""
+        SELECT 
+            COALESCE(SUM(CASE WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 30 THEN bs.quantity_saleable * b.cost_price ELSE 0 END), 0.0) AS val_30,
+            COALESCE(SUM(CASE WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 60 THEN bs.quantity_saleable * b.cost_price ELSE 0 END), 0.0) AS val_60,
+            COALESCE(SUM(CASE WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 90 THEN bs.quantity_saleable * b.cost_price ELSE 0 END), 0.0) AS val_90
+        FROM batch_stock bs
+        JOIN batches b ON bs.batch_id = b.batch_id
+        WHERE bs.quantity_saleable > 0 AND b.status = 'ACTIVE' AND b.expiry_date >= CURDATE()
+        {loc_clause}
+    """, params_exp)
+    exp_row = cur.fetchone()
+    if exp_row:
+        metrics["near_expiry_30d_value"] = round(float(exp_row[0]), 2)
+        metrics["near_expiry_60d_value"] = round(float(exp_row[1]), 2)
+        metrics["near_expiry_90d_value"] = round(float(exp_row[2]), 2)
+
+    # 2. Scrap Value
+    loc_clause_scrap = ""
+    params_scrap = []
+    if user_role in ("store_supervisor", "store_executive", "cashier"):
+        loc_clause_scrap = "AND bs.location_id = %s"
+        params_scrap.append(user_store_id or 2)
+
+    cur.execute(f"""
+        SELECT COALESCE(SUM(bs.quantity_scrap * b.cost_price), 0.0)
+        FROM batch_stock bs
+        JOIN batches b ON bs.batch_id = b.batch_id
+        WHERE bs.quantity_scrap > 0
+        {loc_clause_scrap}
+    """, params_scrap)
+    scrap_row = cur.fetchone()
+    if scrap_row:
+        metrics["scrap_month_value"] = round(float(scrap_row[0]), 2)
+
+    # 3. Push Sale Sell-Through %
+    st_analytics = get_markdown_sellthrough_analytics(cur, location_id=(user_store_id if user_role in ("store_supervisor", "store_executive") else None))
+    metrics["push_sale_sell_through_pct"] = st_analytics["sell_through_percent"]
+
+    # 4. Pending Approvals count (using get_pending_approvals engine)
+    inbox = get_pending_approvals(cur, user_role=user_role, user_store_id=user_store_id, username=username)
+    metrics["pending_approvals_count"] = (
+        len(inbox.get("pending_audits", [])) +
+        len(inbox.get("pending_markdowns", [])) +
+        len(inbox.get("pending_returns", []))
+    )
+
+    # 5. Open Debit Notes (For accounts and admin)
+    if user_role in ("accounts", "admin"):
+        cur.execute("SELECT COUNT(*), COALESCE(SUM(total_amount), 0.0) FROM debit_notes WHERE status IN ('ISSUED', 'ACKNOWLEDGED')")
+        dn_row = cur.fetchone()
+        if dn_row:
+            metrics["open_debit_notes_count"] = int(dn_row[0])
+            metrics["open_debit_notes_amount"] = round(float(dn_row[1]), 2)
+
+    # 6. Warehouse Picker metrics
+    if user_role in ("warehouse_picker", "admin"):
+        cur.execute("SELECT COUNT(*) FROM store_replenishments WHERE status IN ('REQUESTED', 'ALLOCATED') AND from_location_id = 1")
+        p_row = cur.fetchone()
+        if p_row:
+            metrics["dc_pending_picks_count"] = int(p_row[0])
+
+    # 7. Store Executive tasks
+    if user_role in ("store_executive", "store_supervisor", "admin"):
+        cur.execute("SELECT COUNT(*) FROM code_management_audits WHERE status IN ('IN_PROGRESS', 'SUBMITTED')")
+        a_row = cur.fetchone()
+        if a_row:
+            metrics["active_audit_tasks_count"] = int(a_row[0])
+
+    return metrics
+

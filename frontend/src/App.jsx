@@ -38,6 +38,9 @@ import ExpiryReturns from './pages/ExpiryReturns';
 import ScrapLedger from './pages/ScrapLedger';
 import DebitNotes from './pages/DebitNotes';
 
+// Phase 6 Notifications & Expiry Alerts Page
+import NotificationPreferences from './pages/NotificationPreferences';
+
 function ProtectedRoute({ children, adminOnly = false, allowedRoles = [] }) {
   const { user } = useAuth();
 
@@ -260,6 +263,22 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={['admin', 'category_manager']}>
                 <AuditLog />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="settings/notifications"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'category_manager', 'store_supervisor']}>
+                <NotificationPreferences />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="admin/notifications"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'category_manager', 'store_supervisor']}>
+                <NotificationPreferences />
               </ProtectedRoute>
             }
           />

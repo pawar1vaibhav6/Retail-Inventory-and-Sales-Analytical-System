@@ -1,5 +1,7 @@
 import datetime
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pymysql
 from functools import wraps
 from flask import Flask, request, session, jsonify, g
@@ -61,12 +63,19 @@ from batch_engine import (
     log_audit_event,
     get_system_policy,
     update_system_policy,
+    get_expiry_ageing_summary,
+    get_scrap_loss_trend,
+    get_markdown_sellthrough_analytics,
+    get_supplier_return_rate_analytics,
+    get_fefo_override_analytics,
+    get_role_dashboard_metrics,
     ValidationError as BatchValidationError,
     InsufficientStockError,
     PolicyViolationError,
     SegregationOfDutiesError,
     StoreScopingError
 )
+from scheduled_jobs import run_daily_expiry_notification_job, ensure_notifications_table
 
 VALID_ROLES = ("admin", "cashier", "store_supervisor", "store_executive", "warehouse_picker", "category_manager", "accounts")
 
@@ -2626,6 +2635,187 @@ def api_get_audit_log():
     finally:
         conn.close()
 
+
+
+# -----------------------------------------------------------------------------
+# Phase 6: Analytics, Role-Scoped Dashboard KPIs, Notifications & Jobs
+# -----------------------------------------------------------------------------
+@app.route("/api/analytics/expiry-ageing", methods=["GET"])
+def api_analytics_expiry_ageing():
+    loc_id = request.args.get("location_id", type=int)
+    store_id_scoped, _ = get_store_scoping(loc_id)
+    if store_id_scoped:
+        loc_id = store_id_scoped
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            data = get_expiry_ageing_summary(cur, location_id=loc_id)
+            return jsonify({"success": True, "ageing": data})
+    finally:
+        conn.close()
+
+
+@app.route("/api/analytics/scrap-trend", methods=["GET"])
+def api_analytics_scrap_trend():
+    loc_id = request.args.get("location_id", type=int)
+    store_id_scoped, _ = get_store_scoping(loc_id)
+    if store_id_scoped:
+        loc_id = store_id_scoped
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            trend = get_scrap_loss_trend(cur, location_id=loc_id)
+            return jsonify({"success": True, "scrap_trend": trend})
+    finally:
+        conn.close()
+
+
+@app.route("/api/analytics/markdown-sellthrough", methods=["GET"])
+def api_analytics_markdown_sellthrough():
+    loc_id = request.args.get("location_id", type=int)
+    store_id_scoped, _ = get_store_scoping(loc_id)
+    if store_id_scoped:
+        loc_id = store_id_scoped
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            data = get_markdown_sellthrough_analytics(cur, location_id=loc_id)
+            return jsonify({"success": True, "markdown_sellthrough": data})
+    finally:
+        conn.close()
+
+
+@app.route("/api/analytics/supplier-returns", methods=["GET"])
+@require_roles("admin", "category_manager", "accounts", "store_supervisor")
+def api_analytics_supplier_returns():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            rates = get_supplier_return_rate_analytics(cur)
+            return jsonify({"success": True, "supplier_return_rates": rates})
+    finally:
+        conn.close()
+
+
+@app.route("/api/analytics/fefo-overrides", methods=["GET"])
+@require_roles("admin", "category_manager", "store_supervisor")
+def api_analytics_fefo_overrides():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            rates = get_fefo_override_analytics(cur)
+            return jsonify({"success": True, "fefo_overrides": rates})
+    finally:
+        conn.close()
+
+
+@app.route("/api/dashboard/role-metrics", methods=["GET"])
+def api_dashboard_role_metrics():
+    role = session.get("role") or request.headers.get("X-User-Role") or "admin"
+    raw_store = session.get("store_id") or request.headers.get("X-Store-Id")
+    store_id = int(raw_store) if raw_store is not None and str(raw_store).isdigit() else None
+    username = session.get("username") or request.headers.get("X-User-Name") or "supervisor"
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            metrics = get_role_dashboard_metrics(cur, user_role=role, user_store_id=store_id, username=username)
+            return jsonify({"success": True, "metrics": metrics})
+    finally:
+        conn.close()
+
+
+@app.route("/api/jobs/run-expiry-alert-check", methods=["POST"])
+@require_roles("admin", "category_manager", "store_supervisor")
+def api_run_expiry_alert_check():
+    conn = get_connection()
+    try:
+        result = run_daily_expiry_notification_job(conn)
+        return jsonify({"success": True, "result": result})
+    finally:
+        conn.close()
+
+
+@app.route("/api/notifications", methods=["GET"])
+def api_get_notifications():
+    role = session.get("role") or request.headers.get("X-User-Role") or "admin"
+    raw_store = session.get("store_id") or request.headers.get("X-Store-Id")
+    store_id = int(raw_store) if raw_store is not None and str(raw_store).isdigit() else None
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            ensure_notifications_table(cur)
+            query = """
+                SELECT notification_id, recipient_role, recipient_store_id, title, message, severity, category, is_read, created_at
+                FROM system_notifications
+                WHERE (recipient_role = %s OR recipient_role = 'ALL')
+            """
+            params = [role]
+            if role in ("store_supervisor", "store_executive", "cashier") and store_id:
+                query += " AND (recipient_store_id = %s OR recipient_store_id IS NULL)"
+                params.append(store_id)
+            query += " ORDER BY notification_id DESC LIMIT 50"
+            cur.execute(query, tuple(params))
+            notifications = [
+                {
+                    "notification_id": r[0],
+                    "recipient_role": r[1],
+                    "recipient_store_id": r[2],
+                    "title": r[3],
+                    "message": r[4],
+                    "severity": r[5],
+                    "category": r[6],
+                    "is_read": bool(r[7]),
+                    "created_at": str(r[8]) if r[8] else None
+                }
+                for r in cur.fetchall()
+            ]
+            unread_count = sum(1 for n in notifications if not n["is_read"])
+            return jsonify({"success": True, "notifications": notifications, "unread_count": unread_count})
+    finally:
+        conn.close()
+
+
+@app.route("/api/notifications/<int:notif_id>/read", methods=["POST"])
+def api_mark_notification_read(notif_id):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE system_notifications SET is_read = 1 WHERE notification_id = %s", (notif_id,))
+            conn.commit()
+            return jsonify({"success": True, "message": f"Notification #{notif_id} marked as read."})
+    finally:
+        conn.close()
+
+
+@app.route("/api/settings/notifications", methods=["GET", "POST"])
+def api_notification_settings():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            if request.method == "POST":
+                data = request.get_json(silent=True) or {}
+                for k, v in data.items():
+                    update_system_policy(cur, k, str(v), "Updated notification preferences")
+                conn.commit()
+                return jsonify({"success": True, "message": "Notification preferences updated successfully."})
+            else:
+                threshold_days = get_system_policy(cur, "expiry_alert_threshold_days", "30")
+                auto_markdown_days = get_system_policy(cur, "auto_markdown_trigger_days", "15")
+                notify_channels = get_system_policy(cur, "notification_channels", "app,email")
+                auto_job_enabled = get_system_policy(cur, "daily_job_auto_run_enabled", "true")
+                return jsonify({
+                    "success": True,
+                    "settings": {
+                        "expiry_alert_threshold_days": int(threshold_days),
+                        "auto_markdown_trigger_days": int(auto_markdown_days),
+                        "notification_channels": notify_channels,
+                        "daily_job_auto_run_enabled": auto_job_enabled.lower() in ("true", "1")
+                    }
+                })
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Chart, registerables } from 'chart.js';
 import { useTheme } from '../context/ThemeContext';
-import { chartsAPI } from '../services/api';
+import { chartsAPI, enterpriseAnalyticsAPI } from '../services/api';
 
 Chart.register(...registerables);
 
@@ -16,8 +16,15 @@ export default function Charts() {
   const categoryRef = useRef(null);
   const dailyRef = useRef(null);
   const weeklyRef = useRef(null);
+  const ageingRef = useRef(null);
+  const scrapRef = useRef(null);
+
+  const [ageingData, setAgeingData] = useState(null);
+  const [scrapData, setScrapData] = useState([]);
 
   const monthlyChartInstance = useRef(null);
+  const ageingChartInstance = useRef(null);
+  const scrapChartInstance = useRef(null);
   const categoryChartInstance = useRef(null);
   const dailyChartInstance = useRef(null);
   const weeklyChartInstance = useRef(null);
@@ -36,6 +43,9 @@ export default function Charts() {
       .catch((err) => {
         console.warn('[Charts] Failed to fetch chart data:', err);
       });
+
+    enterpriseAnalyticsAPI.getExpiryAgeing().then(res => res?.ageing && setAgeingData(res.ageing)).catch(console.warn);
+    enterpriseAnalyticsAPI.getScrapTrend().then(res => res?.scrap_trend && setScrapData(res.scrap_trend)).catch(console.warn);
 
     return () => {
       isMounted = false;
@@ -365,6 +375,32 @@ export default function Charts() {
           </div>
           <div className="chart-body" style={{ height: '260px', position: 'relative' }}>
             <canvas ref={weeklyRef} />
+          </div>
+        </div>
+
+        {/* 5. Expiry Stock Ageing Breakdown (Phase 6) */}
+        <div className="chart-card mb-4">
+          <div className="chart-header">
+            <h4>
+              <i className="fa-solid fa-hourglass-half text-danger" style={{ marginRight: 8 }} />
+              Near-Expiry Inventory Ageing Risk Distribution
+            </h4>
+          </div>
+          <div className="chart-body" style={{ height: '280px', position: 'relative' }}>
+            <canvas ref={ageingRef} />
+          </div>
+        </div>
+
+        {/* 6. Scrap & Write-off Losses by Category (Phase 6) */}
+        <div className="chart-card mb-4">
+          <div className="chart-header">
+            <h4>
+              <i className="fa-solid fa-dumpster text-secondary" style={{ marginRight: 8 }} />
+              Scrap &amp; Write-Off Losses by Product Category
+            </h4>
+          </div>
+          <div className="chart-body" style={{ height: '280px', position: 'relative' }}>
+            <canvas ref={scrapRef} />
           </div>
         </div>
       </div>

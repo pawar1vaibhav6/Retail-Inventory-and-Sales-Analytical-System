@@ -364,6 +364,26 @@ export const financeAPI = {
   settleDebitNote: async (dnId, data = {}) => request(`/api/finance/debit-notes/${dnId}/settle`, { method: 'POST', body: JSON.stringify(data) })
 };
 
+// -----------------------------------------------------------------------------
+// Phase 6: Analytics, Role Metrics & Notifications API
+// -----------------------------------------------------------------------------
+export const enterpriseAnalyticsAPI = {
+  getExpiryAgeing: async (locationId) => request(`/api/analytics/expiry-ageing${locationId ? `?location_id=${locationId}` : ''}`),
+  getScrapTrend: async (locationId) => request(`/api/analytics/scrap-trend${locationId ? `?location_id=${locationId}` : ''}`),
+  getMarkdownSellthrough: async (locationId) => request(`/api/analytics/markdown-sellthrough${locationId ? `?location_id=${locationId}` : ''}`),
+  getSupplierReturns: async () => request('/api/analytics/supplier-returns'),
+  getFEFOOverrides: async () => request('/api/analytics/fefo-overrides'),
+  getRoleMetrics: async () => request('/api/dashboard/role-metrics')
+};
+
+export const notificationsAPI = {
+  getNotifications: async () => request('/api/notifications'),
+  markAsRead: async (notifId) => request(`/api/notifications/${notifId}/read`, { method: 'POST' }),
+  getSettings: async () => request('/api/settings/notifications'),
+  updateSettings: async (settings) => request('/api/settings/notifications', { method: 'POST', body: JSON.stringify(settings) }),
+  triggerExpiryJob: async () => request('/api/jobs/run-expiry-alert-check', { method: 'POST' })
+};
+
 export default {
   auth: authAPI,
   dashboard: dashboardAPI,
@@ -381,5 +401,7 @@ export default {
   markdowns: markdownsAPI,
   approvals: approvalsAPI,
   returns: returnsAPI,
-  finance: financeAPI
+  finance: financeAPI,
+  enterpriseAnalytics: enterpriseAnalyticsAPI,
+  notifications: notificationsAPI
 };
