@@ -50,7 +50,7 @@ class StoreScopingError(BatchEngineError):
 # -----------------------------------------------------------------------------
 # Enterprise Governance: Segregation of Duties, Scoping & Auditing
 # -----------------------------------------------------------------------------
-def enforce_store_scoping(user_role: str, user_store_id: Optional[int], target_store_id: int):
+def enforce_store_scoping(user_role: str = "admin", user_store_id: Optional[int] = None, target_store_id: Optional[int] = None):
     """
     Enforces store-level data isolation for store-bound roles:
     - 'store_executive' and 'store_supervisor' can ONLY access their own store_id.
@@ -61,17 +61,22 @@ def enforce_store_scoping(user_role: str, user_store_id: Optional[int], target_s
     if user_role in ("store_executive", "store_supervisor", "cashier"):
         if user_store_id is None:
             raise StoreScopingError(f"User role '{user_role}' has no store assigned.")
-        if int(user_store_id) != int(target_store_id):
+        if target_store_id is not None and int(user_store_id) != int(target_store_id):
             raise StoreScopingError(
                 f"Access denied: Role '{user_role}' is scoped to Store #{user_store_id}, "
                 f"cannot perform actions at Store #{target_store_id}."
             )
+        return int(user_store_id), user_role
     elif user_role == "warehouse_picker":
-        if user_store_id is not None and int(user_store_id) != int(target_store_id):
+        if user_store_id is not None and target_store_id is not None and int(user_store_id) != int(target_store_id):
             raise StoreScopingError(
                 f"Access denied: DC Picker is assigned to Location #{user_store_id}, "
                 f"cannot perform actions at Location #{target_store_id}."
             )
+        return (int(user_store_id) if user_store_id is not None else 1), user_role
+
+    target_int = int(target_store_id) if target_store_id is not None and str(target_store_id).isdigit() else None
+    return target_int, user_role
 
 
 def validate_segregation_of_duties(creator_username: str, actor_username: str, action_description: str = "approval"):
@@ -900,7 +905,7 @@ def create_code_audit(cur, location_id: int, created_by: str) -> Dict[str, Any]:
 
 def submit_code_audit(cur, audit_id: int, physical_counts: List[Dict[str, Any]], submitted_by: str) -> Dict[str, Any]:
     """Store executive records physical counts and calculates discrepancies."""
-    cur.execute("SELECT status FROM code_management_audits WHERE audit_id = %s FOR UPDATE", (audit_id,))
+    cur.execute("SELECT status, location_id FROM code_management_audits WHERE audit_id = %s FOR UPDATE", (audit_id,))
     row = cur.fetchone()
     if not row or row[0] != "PENDING_COUNT":
         raise PolicyViolationError(f"Audit #{audit_id} is not in 'PENDING_COUNT' status.")
@@ -923,20 +928,33 @@ def submit_code_audit(cur, audit_id: int, physical_counts: List[Dict[str, Any]],
             WHERE audit_item_id = %s
         """, (phys_qty, disc, remarks, item_id))
 
-    cur.execute("UPDATE code_management_audits SET status = 'SUBMITTED' WHERE audit_id = %s", (audit_id,))
+    cur.execute("""
+        UPDATE code_management_audits 
+        SET status = 'SUBMITTED', submitted_by = %s 
+        WHERE audit_id = %s
+    """, (submitted_by, audit_id))
     return {"audit_id": audit_id, "status": "SUBMITTED", "discrepant_batches": total_discrepancies}
 
 
-def approve_code_audit(cur, audit_id: int, approved_by: str) -> Dict[str, Any]:
+def approve_code_audit(cur, audit_id: int, approved_by: str, user_role: str = "store_supervisor") -> Dict[str, Any]:
     """
     Supervisor approves audit and applies adjustments to batch_stock and movements.
+    Strictly enforces Segregation of Duties: approver != person who submitted physical counts.
     """
-    cur.execute("SELECT location_id, audit_number, status FROM code_management_audits WHERE audit_id = %s FOR UPDATE", (audit_id,))
+    cur.execute("""
+        SELECT location_id, audit_number, status, created_by, submitted_by 
+        FROM code_management_audits 
+        WHERE audit_id = %s FOR UPDATE
+    """, (audit_id,))
     audit = cur.fetchone()
     if not audit or audit[2] != "SUBMITTED":
         raise PolicyViolationError(f"Audit #{audit_id} must be 'SUBMITTED' before approval.")
 
-    loc_id, audit_no, _ = audit
+    loc_id, audit_no, _, creator, submitter = audit
+
+    # Segregation of Duties validation
+    count_submitter = submitter or creator
+    validate_segregation_of_duties(count_submitter, approved_by, f"Audit #{audit_no} Discrepancy Approval")
 
     cur.execute("""
         SELECT ai.product_id, ai.batch_id, ai.system_qty, ai.physical_qty, ai.discrepancy_qty, b.batch_number
@@ -969,7 +987,231 @@ def approve_code_audit(cur, audit_id: int, approved_by: str) -> Dict[str, Any]:
         WHERE audit_id = %s
     """, (approved_by, audit_id))
 
+    log_audit_event(
+        cur, action_type="AUDIT_DISCREPANCY_APPROVED", entity_type="AUDIT", entity_id=audit_no,
+        user_id=0, username=approved_by, user_role=user_role,
+        store_id=loc_id, details={"audit_id": audit_id, "adjustments_count": len(discrepancies), "submitted_by": count_submitter}
+    )
+
     return {"audit_id": audit_id, "status": "APPROVED", "adjustments_applied": len(discrepancies)}
+
+
+def propose_markdown(cur, location_id: int, product_id: int, batch_id: int,
+                     proposed_discount: float, proposed_by: str, notes: Optional[str] = None) -> Dict[str, Any]:
+    """Store executive or supervisor proposes a markdown promotion on near-expiry stock."""
+    cur.execute("""
+        SELECT p.price, p.cost, COALESCE(p.floor_price_percent, 50.00), bs.quantity_saleable,
+               DATEDIFF(b.expiry_date, CURRENT_DATE()), b.batch_number
+        FROM Products p
+        JOIN batches b ON b.product_id = p.product_id
+        JOIN batch_stock bs ON bs.batch_id = b.batch_id AND bs.location_id = %s
+        WHERE p.product_id = %s AND b.batch_id = %s
+    """, (location_id, product_id, batch_id))
+    row = cur.fetchone()
+    if not row:
+        raise ValidationError("Specified product/batch/location not found.")
+
+    price, cost, floor_pct, stock_qty, days_left, b_no = row
+    orig_price = float(price)
+    discounted_price = round(orig_price * (1.0 - (proposed_discount / 100.0)), 2)
+    floor_price = max(float(cost), round(orig_price * (float(floor_pct) / 100.0), 2))
+    is_below_floor = discounted_price < floor_price
+
+    promo_code = f"MKD-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+
+    cur.execute("""
+        INSERT INTO markdown_promotions (
+            promotion_code, product_id, batch_id, location_id, days_to_expiry_at_creation,
+            suggested_discount_percent, approved_discount_percent, original_price,
+            markdown_price, floor_price, is_below_floor, status, created_by,
+            approval_notes, start_date, end_date
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'PROPOSED', %s, %s, CURRENT_DATE(), DATE_ADD(CURRENT_DATE(), INTERVAL 14 DAY))
+    """, (
+        promo_code, product_id, batch_id, location_id, days_left,
+        proposed_discount, proposed_discount, orig_price, discounted_price,
+        floor_price, 1 if is_below_floor else 0, proposed_by, notes
+    ))
+    mkd_id = cur.lastrowid
+    return {
+        "markdown_id": mkd_id,
+        "promotion_code": promo_code,
+        "status": "PROPOSED",
+        "markdown_price": discounted_price,
+        "floor_price": floor_price,
+        "is_below_floor": is_below_floor
+    }
+
+
+def approve_markdown(cur, markdown_id: int, approved_discount: float, approved_by: str,
+                     user_role: str, notes: Optional[str] = None) -> Dict[str, Any]:
+    """Approves a markdown promotion, activating it for POS push-sale."""
+    if user_role not in ("admin", "store_supervisor", "category_manager"):
+        raise PolicyViolationError(f"Role '{user_role}' is not authorized to approve markdowns.")
+
+    cur.execute("""
+        SELECT m.markdown_id, m.product_id, m.batch_id, m.location_id, m.original_price,
+               m.floor_price, m.status, m.created_by, b.batch_number, bs.quantity_saleable
+        FROM markdown_promotions m
+        JOIN batches b ON m.batch_id = b.batch_id
+        JOIN batch_stock bs ON bs.batch_id = b.batch_id AND bs.location_id = m.location_id
+        WHERE m.markdown_id = %s FOR UPDATE
+    """, (markdown_id,))
+    mkd = cur.fetchone()
+    if not mkd:
+        raise ValidationError(f"Markdown #{markdown_id} not found.")
+
+    m_id, pid, bid, loc_id, orig_price, floor_price, status, creator, b_no, stock_qty = mkd
+    if status != "PROPOSED":
+        raise PolicyViolationError(f"Markdown #{markdown_id} is in '{status}' status, cannot approve.")
+
+    # Segregation of Duties Check
+    validate_segregation_of_duties(creator, approved_by, f"Markdown #{markdown_id} Approval")
+
+    # Policy check: supervisor discount limit
+    cur.execute("SELECT policy_value FROM system_policies WHERE policy_key = 'supervisor_max_discount_pct'")
+    sup_lim_row = cur.fetchone()
+    sup_max_disc = float(sup_lim_row[0]) if sup_lim_row else 20.0
+
+    if user_role == "store_supervisor" and approved_discount > sup_max_disc:
+        raise PolicyViolationError(
+            f"Discount of {approved_discount}% exceeds Store Supervisor approval limit of {sup_max_disc}%. "
+            f"Requires Category Manager or Admin approval."
+        )
+
+    orig_price_f = float(orig_price)
+    floor_price_f = float(floor_price)
+    new_price = round(orig_price_f * (1.0 - (approved_discount / 100.0)), 2)
+    is_below_floor = new_price < floor_price_f
+
+    if is_below_floor and user_role not in ("admin", "category_manager"):
+        raise PolicyViolationError(
+            f"Price ₹{new_price} is below floor policy ₹{floor_price_f}. Requires Category Manager or Admin approval."
+        )
+
+    cur.execute("""
+        UPDATE markdown_promotions 
+        SET approved_discount_percent = %s, markdown_price = %s, is_below_floor = %s,
+            status = 'ACTIVE', approved_by = %s, approval_notes = %s,
+            start_date = CURRENT_DATE(), end_date = DATE_ADD(CURRENT_DATE(), INTERVAL 14 DAY)
+        WHERE markdown_id = %s
+    """, (approved_discount, new_price, 1 if is_below_floor else 0, approved_by, notes, markdown_id))
+
+    # Initialize or update sales tracking
+    cur.execute("""
+        INSERT INTO markdown_sales_tracking (markdown_id, batch_id, units_initially_marked_down, units_sold, revenue_generated)
+        VALUES (%s, %s, %s, 0, 0.00)
+        ON DUPLICATE KEY UPDATE units_initially_marked_down = VALUES(units_initially_marked_down)
+    """, (markdown_id, bid, stock_qty))
+
+    log_audit_event(
+        cur, action_type="MARKDOWN_APPROVED", entity_type="MARKDOWN", entity_id=str(markdown_id),
+        user_id=0, username=approved_by, user_role=user_role,
+        store_id=loc_id, details={"discount_pct": approved_discount, "markdown_price": new_price, "floor_price": floor_price_f, "proposer": creator}
+    )
+
+    return {
+        "markdown_id": markdown_id,
+        "status": "ACTIVE",
+        "approved_discount_percent": approved_discount,
+        "markdown_price": new_price,
+        "floor_price": floor_price_f
+    }
+
+
+def get_pending_approvals(cur, user_role: str, user_store_id: Optional[int], username: str) -> Dict[str, Any]:
+    """Unified multi-role governance inbox returning items awaiting review with Segregation of Duties guard."""
+    # 1. Pending Audits (status: SUBMITTED)
+    audit_query = """
+        SELECT a.audit_id, a.audit_number, a.location_id, l.name, a.created_by, a.submitted_by,
+               a.created_at, COUNT(ai.audit_item_id) AS total_items,
+               SUM(CASE WHEN ai.discrepancy_qty != 0 THEN 1 ELSE 0 END) AS discrepancies
+        FROM code_management_audits a
+        JOIN locations l ON a.location_id = l.location_id
+        LEFT JOIN audit_items ai ON a.audit_id = ai.audit_id
+        WHERE a.status = 'SUBMITTED'
+    """
+    params = []
+    if user_role in ("store_supervisor", "store_executive") and user_store_id:
+        audit_query += " AND a.location_id = %s"
+        params.append(user_store_id)
+    audit_query += " GROUP BY a.audit_id ORDER BY a.created_at DESC"
+    cur.execute(audit_query, params)
+
+    audits = []
+    for r in cur.fetchall():
+        sub = r[5] or r[4]
+        can_app = (user_role in ("admin", "store_supervisor")) and (username != sub)
+        audits.append({
+            "audit_id": r[0], "audit_number": r[1], "location_id": r[2], "location_name": r[3],
+            "created_by": r[4], "submitted_by": sub, "created_at": str(r[6]),
+            "total_items": r[7], "discrepancies": r[8],
+            "can_approve": can_app,
+            "sod_blocked": username == sub
+        })
+
+    # 2. Pending Markdowns (status: PROPOSED)
+    mkd_query = """
+        SELECT m.markdown_id, m.promotion_code, m.product_id, p.p_name, m.batch_id, b.batch_number,
+               m.location_id, l.name, m.suggested_discount_percent, m.original_price, m.markdown_price,
+               m.floor_price, m.is_below_floor, m.created_by, m.created_at
+        FROM markdown_promotions m
+        JOIN Products p ON m.product_id = p.product_id
+        JOIN batches b ON m.batch_id = b.batch_id
+        JOIN locations l ON m.location_id = l.location_id
+        WHERE m.status = 'PROPOSED'
+    """
+    mkd_params = []
+    if user_role in ("store_supervisor", "store_executive") and user_store_id:
+        mkd_query += " AND m.location_id = %s"
+        mkd_params.append(user_store_id)
+    mkd_query += " ORDER BY m.created_at DESC"
+    cur.execute(mkd_query, mkd_params)
+
+    markdowns = []
+    for r in cur.fetchall():
+        creator = r[13]
+        disc = float(r[8])
+        below_fl = bool(r[12])
+        # Supervisor can approve if <= 20% and not below floor, otherwise Cat Mgr / Admin
+        role_allowed = (user_role in ("admin", "category_manager")) or (user_role == "store_supervisor" and disc <= 20.0 and not below_fl)
+        can_app = role_allowed and (username != creator)
+        markdowns.append({
+            "markdown_id": r[0], "promotion_code": r[1], "product_id": r[2], "product_name": r[3],
+            "batch_id": r[4], "batch_number": r[5], "location_id": r[6], "location_name": r[7],
+            "proposed_discount_percent": disc, "original_price": float(r[9]), "markdown_price": float(r[10]),
+            "floor_price": float(r[11]), "is_below_floor": below_fl, "created_by": creator,
+            "created_at": str(r[14]), "can_approve": can_app, "sod_blocked": username == creator
+        })
+
+    # 3. Pending Expiry Returns (status: DRAFT)
+    ret_query = """
+        SELECT r.return_id, r.return_number, r.location_id, l.name, r.product_id, p.p_name,
+               r.batch_id, b.batch_number, r.quantity, r.total_claim_amount, r.created_by, r.created_at
+        FROM vendor_expiry_returns r
+        JOIN Products p ON r.product_id = p.product_id
+        JOIN batches b ON r.batch_id = b.batch_id
+        JOIN locations l ON r.location_id = l.location_id
+        WHERE r.status = 'DRAFT'
+    """
+    ret_params = []
+    if user_role in ("store_supervisor", "store_executive") and user_store_id:
+        ret_query += " AND r.location_id = %s"
+        ret_params.append(user_store_id)
+    ret_query += " ORDER BY r.created_at DESC"
+    cur.execute(ret_query, ret_params)
+
+    returns = []
+    for r in cur.fetchall():
+        creator = r[10]
+        can_app = (user_role in ("admin", "store_supervisor")) and (username != creator)
+        returns.append({
+            "return_id": r[0], "return_number": r[1], "location_id": r[2], "location_name": r[3],
+            "product_id": r[4], "product_name": r[5], "batch_id": r[6], "batch_number": r[7],
+            "quantity": r[8], "total_claim_amount": float(r[9]), "created_by": creator,
+            "created_at": str(r[11]), "can_approve": can_app, "sod_blocked": username == creator
+        })
+
+    return {"pending_audits": audits, "pending_markdowns": markdowns, "pending_returns": returns}
 
 
 # -----------------------------------------------------------------------------
@@ -1043,68 +1285,7 @@ def calculate_markdown_suggestions(cur, location_id: Optional[int] = None) -> Li
     return suggestions
 
 
-def approve_markdown(cur, location_id: int, product_id: int, batch_id: int,
-                     approved_discount: float, approved_by: str,
-                     user_role: str, notes: Optional[str] = None) -> Dict[str, Any]:
-    """Approves a markdown promotion, activating it for POS push-sale."""
-    if user_role not in ("admin", "store_supervisor", "category_manager"):
-        raise PolicyViolationError(f"Role '{user_role}' is not authorized to approve markdowns.")
 
-    cur.execute("""
-        SELECT p.price, p.cost, COALESCE(p.floor_price_percent, 50.00), bs.quantity_saleable,
-               DATEDIFF(b.expiry_date, CURRENT_DATE()), b.batch_number
-        FROM Products p
-        JOIN batches b ON b.product_id = p.product_id
-        JOIN batch_stock bs ON bs.batch_id = b.batch_id AND bs.location_id = %s
-        WHERE p.product_id = %s AND b.batch_id = %s
-    """, (location_id, product_id, batch_id))
-    row = cur.fetchone()
-    if not row:
-        raise ValidationError("Specified product/batch/location not found.")
-
-    price, cost, floor_pct, stock_qty, days_left, b_no = row
-    orig_price = float(price)
-    discounted_price = round(orig_price * (1.0 - (approved_discount / 100.0)), 2)
-    floor_price = max(float(cost), round(orig_price * (float(floor_pct) / 100.0), 2))
-    is_below_floor = discounted_price < floor_price
-
-    if is_below_floor and user_role not in ("admin", "store_supervisor"):
-        raise PolicyViolationError(
-            f"Price ₹{discounted_price} is below floor policy ₹{floor_price}. Requires supervisor or admin approval."
-        )
-
-    promo_code = f"MKD-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
-
-    cur.execute("""
-        INSERT INTO markdown_promotions (
-            promotion_code, product_id, batch_id, location_id, days_to_expiry_at_creation,
-            suggested_discount_percent, approved_discount_percent, original_price,
-            markdown_price, floor_price, is_below_floor, status, created_by, approved_by,
-            approval_notes, start_date, end_date
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, CURRENT_DATE(), DATE_ADD(CURRENT_DATE(), INTERVAL 14 DAY))
-    """, (
-        promo_code, product_id, batch_id, location_id, days_left,
-        approved_discount, approved_discount, orig_price, discounted_price,
-        floor_price, 1 if is_below_floor else 0, approved_by, approved_by, notes
-    ))
-    mkd_id = cur.lastrowid
-
-    # Initialize sales tracking
-    cur.execute("""
-        INSERT INTO markdown_sales_tracking (markdown_id, batch_id, units_initially_marked_down, units_sold, revenue_generated)
-        VALUES (%s, %s, %s, 0, 0.00)
-    """, (mkd_id, batch_id, stock_qty))
-
-    return {
-        "markdown_id": mkd_id,
-        "promotion_code": promo_code,
-        "status": "ACTIVE",
-        "product_id": product_id,
-        "batch_number": b_no,
-        "approved_discount_percent": approved_discount,
-        "markdown_price": discounted_price,
-        "floor_price": floor_price
-    }
 
 
 def get_active_markdown_for_batch(cur, batch_id: int, location_id: int) -> Optional[Dict[str, Any]]:
@@ -1155,9 +1336,9 @@ def create_expiry_return(cur, location_id: int, supplier_id: int, product_id: in
     cur.execute("""
         INSERT INTO vendor_expiry_returns (
             return_number, location_id, supplier_id, product_id, batch_id, grn_id,
-            quantity, unit_cost, total_claim_amount, reason, status, idempotency_key
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'DRAFT', %s)
-    """, (return_number, location_id, supplier_id, product_id, batch_id, grn_id, qty, unit_cost, total_claim, reason, idempotency_key))
+            quantity, unit_cost, total_claim_amount, reason, created_by, status, idempotency_key
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'DRAFT', %s)
+    """, (return_number, location_id, supplier_id, product_id, batch_id, grn_id, qty, unit_cost, total_claim, reason, created_by, idempotency_key))
     ret_id = cur.lastrowid
 
     return {
@@ -1179,10 +1360,11 @@ def post_expiry_return_atomic(cur, return_id: int, posted_by: str) -> Dict[str, 
     4. Generates an official debit note against the supplier.
     5. Writes stock_movements ledger.
     6. Guarantees idempotency.
+    7. Enforces Segregation of Duties: drafter cannot approve & post.
     """
     cur.execute("""
         SELECT return_id, return_number, location_id, supplier_id, product_id,
-               batch_id, grn_id, quantity, unit_cost, total_claim_amount, status, idempotency_key
+               batch_id, grn_id, quantity, unit_cost, total_claim_amount, status, idempotency_key, created_by
         FROM vendor_expiry_returns
         WHERE return_id = %s
         FOR UPDATE
@@ -1191,10 +1373,14 @@ def post_expiry_return_atomic(cur, return_id: int, posted_by: str) -> Dict[str, 
     if not ret:
         raise ValidationError(f"Return document #{return_id} not found.")
 
-    ret_id, ret_no, loc_id, sup_id, pid, bid, grn_id, qty, unit_cost, claim_amt, status, idemp_key = ret
+    ret_id, ret_no, loc_id, sup_id, pid, bid, grn_id, qty, unit_cost, claim_amt, status, idemp_key = ret[:12]
+    creator = ret[12] if len(ret) > 12 else "store_executive"
 
     if status != "DRAFT":
         raise PolicyViolationError(f"Idempotency Guard: Return #{ret_no} has already been posted (status: {status}).")
+
+    # Segregation of Duties Check: drafter cannot approve & post
+    validate_segregation_of_duties(creator, posted_by, f"Return #{ret_no} Posting")
 
     # Lock batch_stock row
     cur.execute("""
@@ -1257,6 +1443,12 @@ def post_expiry_return_atomic(cur, return_id: int, posted_by: str) -> Dict[str, 
         WHERE return_id = %s
     """, (posted_by, ret_id))
 
+    log_audit_event(
+        cur, action_type="EXPIRY_RETURN_POSTED", entity_type="RETURN", entity_id=ret_no,
+        user_id=0, username=posted_by, user_role="store_supervisor",
+        store_id=loc_id, details={"return_id": ret_id, "debit_note": dn_number, "qty": qty, "total_claim": total_dn_amount, "drafter": creator}
+    )
+
     return {
         "return_id": ret_id,
         "return_number": ret_no,
@@ -1268,6 +1460,60 @@ def post_expiry_return_atomic(cur, return_id: int, posted_by: str) -> Dict[str, 
         "total_credit_amount": total_dn_amount,
         "message": f"Successfully moved {qty} units to scrap ledger and generated Debit Note {dn_number}."
     }
+
+
+def acknowledge_debit_note(cur, debit_note_id: int, acknowledged_by: str, user_role: str) -> Dict[str, Any]:
+    """Accounts officer marks debit note as acknowledged by supplier."""
+    if user_role not in ("admin", "accounts"):
+        raise PolicyViolationError(f"Role '{user_role}' is not authorized to acknowledge debit notes.")
+
+    cur.execute("SELECT debit_note_id, debit_note_number, return_id, status FROM debit_notes WHERE debit_note_id = %s FOR UPDATE", (debit_note_id,))
+    dn = cur.fetchone()
+    if not dn:
+        raise ValidationError(f"Debit Note #{debit_note_id} not found.")
+    if dn[3] != "ISSUED":
+        raise PolicyViolationError(f"Debit Note #{dn[1]} is in '{dn[3]}' status, cannot acknowledge.")
+
+    cur.execute("""
+        UPDATE debit_notes 
+        SET status = 'ACKNOWLEDGED', acknowledged_by = %s, acknowledged_at = NOW() 
+        WHERE debit_note_id = %s
+    """, (acknowledged_by, debit_note_id))
+
+    cur.execute("UPDATE vendor_expiry_returns SET status = 'SUPPLIER_ACKNOWLEDGED' WHERE return_id = %s", (dn[2],))
+
+    log_audit_event(
+        cur, action_type="DEBIT_NOTE_ACKNOWLEDGED", entity_type="DEBIT_NOTE", entity_id=dn[1],
+        user_id=0, username=acknowledged_by, user_role=user_role, details={"debit_note_id": debit_note_id}
+    )
+    return {"debit_note_id": debit_note_id, "status": "ACKNOWLEDGED"}
+
+
+def settle_debit_note(cur, debit_note_id: int, settled_by: str, user_role: str, credit_ref: Optional[str] = None) -> Dict[str, Any]:
+    """Accounts officer or Admin marks credit received from supplier against debit note."""
+    if user_role not in ("admin", "accounts"):
+        raise PolicyViolationError(f"Role '{user_role}' is not authorized to settle credit notes.")
+
+    cur.execute("SELECT debit_note_id, debit_note_number, return_id, status FROM debit_notes WHERE debit_note_id = %s FOR UPDATE", (debit_note_id,))
+    dn = cur.fetchone()
+    if not dn:
+        raise ValidationError(f"Debit Note #{debit_note_id} not found.")
+    if dn[3] not in ("ISSUED", "ACKNOWLEDGED"):
+        raise PolicyViolationError(f"Debit Note #{dn[1]} is already settled or cancelled.")
+
+    cur.execute("""
+        UPDATE debit_notes 
+        SET status = 'SETTLED', settled_by = %s, settled_at = NOW(), supplier_credit_ref = %s 
+        WHERE debit_note_id = %s
+    """, (settled_by, credit_ref, debit_note_id))
+
+    cur.execute("UPDATE vendor_expiry_returns SET status = 'CREDIT_RECEIVED' WHERE return_id = %s", (dn[2],))
+
+    log_audit_event(
+        cur, action_type="DEBIT_NOTE_SETTLED", entity_type="DEBIT_NOTE", entity_id=dn[1],
+        user_id=0, username=settled_by, user_role=user_role, details={"debit_note_id": debit_note_id, "credit_ref": credit_ref}
+    )
+    return {"debit_note_id": debit_note_id, "status": "SETTLED"}
 
 
 # -----------------------------------------------------------------------------

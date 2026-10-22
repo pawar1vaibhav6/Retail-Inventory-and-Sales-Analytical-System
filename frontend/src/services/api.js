@@ -309,6 +309,61 @@ export const replenishmentAPI = {
   }
 };
 
+// -----------------------------------------------------------------------------
+// Phase 4: Reports, Audits, Markdowns & Approvals API
+// -----------------------------------------------------------------------------
+export const reportsAPI = {
+  getExpiryStock: async (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/api/reports/expiry-stock${qs ? `?${qs}` : ''}`);
+  },
+  getDumpStock: async (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/api/reports/dump-stock${qs ? `?${qs}` : ''}`);
+  },
+  getTransferSuggestions: async () => {
+    return request('/api/reports/transfer-suggestions');
+  }
+};
+
+export const auditsAPI = {
+  getAudits: async () => request('/api/audits'),
+  getAudit: async (id) => request(`/api/audits/${id}`),
+  createAudit: async (data) => request('/api/audits/create', { method: 'POST', body: JSON.stringify(data) }),
+  submitAudit: async (id, counts) => request(`/api/audits/${id}/submit`, { method: 'POST', body: JSON.stringify({ counts }) }),
+  approveAudit: async (id) => request(`/api/audits/${id}/approve`, { method: 'POST' })
+};
+
+export const markdownsAPI = {
+  getSuggestions: async (locationId) => {
+    const qs = locationId ? `?location_id=${locationId}` : '';
+    return request(`/api/markdowns/suggestions${qs}`);
+  },
+  getPromotions: async () => request('/api/markdowns/promotions'),
+  proposeMarkdown: async (data) => request('/api/markdowns/propose', { method: 'POST', body: JSON.stringify(data) }),
+  approveMarkdown: async (id, data) => request(`/api/markdowns/${id}/approve`, { method: 'POST', body: JSON.stringify(data) })
+};
+
+export const approvalsAPI = {
+  getPendingApprovals: async () => request('/api/approvals/pending')
+};
+
+// -----------------------------------------------------------------------------
+// Phase 5: Expiry Returns, Scrap & Debit Notes API
+// -----------------------------------------------------------------------------
+export const returnsAPI = {
+  getReturns: async () => request('/api/returns/expiry'),
+  createReturn: async (data) => request('/api/returns/expiry/create', { method: 'POST', body: JSON.stringify(data) }),
+  postReturn: async (returnId) => request(`/api/returns/expiry/${returnId}/post`, { method: 'POST' }),
+  getScrapLedger: async () => request('/api/returns/scrap-ledger')
+};
+
+export const financeAPI = {
+  getDebitNotes: async () => request('/api/returns/debit-notes'),
+  acknowledgeDebitNote: async (dnId) => request(`/api/finance/debit-notes/${dnId}/acknowledge`, { method: 'POST' }),
+  settleDebitNote: async (dnId, data = {}) => request(`/api/finance/debit-notes/${dnId}/settle`, { method: 'POST', body: JSON.stringify(data) })
+};
+
 export default {
   auth: authAPI,
   dashboard: dashboardAPI,
@@ -320,5 +375,11 @@ export default {
   charts: chartsAPI,
   admin: adminAPI,
   batch: batchAPI,
-  replenishment: replenishmentAPI
+  replenishment: replenishmentAPI,
+  reports: reportsAPI,
+  audits: auditsAPI,
+  markdowns: markdownsAPI,
+  approvals: approvalsAPI,
+  returns: returnsAPI,
+  finance: financeAPI
 };

@@ -26,6 +26,18 @@ import BatchTraceability from './pages/BatchTraceability';
 import ReplenishmentRequests from './pages/ReplenishmentRequests';
 import FEFOPickList from './pages/FEFOPickList';
 
+// Phase 4 Intelligence, Audits, Markdowns & Governance Pages
+import ExpiryReport from './pages/ExpiryReport';
+import TransferSuggestions from './pages/TransferSuggestions';
+import CodeManagementAudits from './pages/CodeManagementAudits';
+import MarkdownsPushSale from './pages/MarkdownsPushSale';
+import ApprovalsInbox from './pages/ApprovalsInbox';
+
+// Phase 5 Returns, Scrap & Debit Notes Pages
+import ExpiryReturns from './pages/ExpiryReturns';
+import ScrapLedger from './pages/ScrapLedger';
+import DebitNotes from './pages/DebitNotes';
+
 function ProtectedRoute({ children, adminOnly = false, allowedRoles = [] }) {
   const { user } = useAuth();
 
@@ -112,6 +124,74 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={['admin', 'warehouse_picker']}>
                 <FEFOPickList />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Phase 4 Intelligence, Audits, Markdowns & Approvals */}
+          <Route
+            path="reports/expiry"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'category_manager', 'store_supervisor', 'store_executive']}>
+                <ExpiryReport />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="reports/transfers"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'category_manager', 'store_supervisor']}>
+                <TransferSuggestions />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="audits/code-management"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'store_supervisor', 'store_executive']}>
+                <CodeManagementAudits />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="markdowns/promotions"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'category_manager', 'store_supervisor', 'store_executive']}>
+                <MarkdownsPushSale />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="governance/approvals"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'store_supervisor', 'category_manager', 'store_executive', 'accounts']}>
+                <ApprovalsInbox />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Phase 5 Returns, Scrap & Debit Notes */}
+          <Route
+            path="returns/expiry"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'category_manager', 'store_supervisor', 'store_executive', 'accounts']}>
+                <ExpiryReturns />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="returns/scrap-ledger"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'category_manager', 'store_supervisor', 'store_executive', 'accounts']}>
+                <ScrapLedger />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="finance/debit-notes"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'accounts', 'store_supervisor']}>
+                <DebitNotes />
               </ProtectedRoute>
             }
           />

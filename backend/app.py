@@ -46,10 +46,14 @@ from batch_engine import (
     submit_code_audit,
     approve_code_audit,
     calculate_markdown_suggestions,
+    propose_markdown,
     approve_markdown,
+    get_pending_approvals,
     get_active_markdown_for_batch,
     create_expiry_return,
     post_expiry_return_atomic,
+    acknowledge_debit_note,
+    settle_debit_note,
     validate_batch_for_pos,
     record_movement,
     enforce_store_scoping,
@@ -142,6 +146,59 @@ def not_found(e):
 @app.errorhandler(500)
 def server_error(e):
     return jsonify({"success": False, "message": f"Internal server error: {e}"}), 500
+
+
+@app.errorhandler(StoreScopingError)
+def handle_scoping_error(e):
+    return jsonify({"success": False, "message": str(e)}), 403
+
+
+@app.errorhandler(SegregationOfDutiesError)
+def handle_segregation_error(e):
+    return jsonify({"success": False, "message": str(e)}), 403
+
+
+@app.errorhandler(PolicyViolationError)
+def handle_policy_error(e):
+    return jsonify({"success": False, "message": str(e)}), 400
+
+
+@app.errorhandler(BatchValidationError)
+def handle_batch_error(e):
+    return jsonify({"success": False, "message": str(e)}), 400
+
+
+@app.errorhandler(InsufficientStockError)
+def handle_stock_error(e):
+    return jsonify({"success": False, "message": str(e)}), 400
+
+
+def get_store_scoping(target_store_id=None):
+    """
+    Resolves effective store_id and role for the current request.
+    For store-scoped roles (store_executive, store_supervisor, cashier),
+    effective store_id is the user's store_id (defaulting to 2 if not set).
+    If target_store_id is supplied and contradicts user's store, raises StoreScopingError.
+    For warehouse_picker, effective store_id is 1 (DC).
+    For cross-store roles (admin, category_manager, accounts), returns (target_store_id, role).
+    """
+    role = getattr(g, "user_role", None) or session.get("role") or request.headers.get("X-User-Role") or "admin"
+    raw_store = getattr(g, "user_store_id", None) or session.get("store_id") or request.headers.get("X-Store-Id")
+    user_store_id = int(raw_store) if raw_store is not None and str(raw_store).isdigit() else None
+
+    if role in ("store_executive", "store_supervisor", "cashier"):
+        assigned_store = user_store_id if user_store_id is not None else 2
+        if target_store_id is not None and int(target_store_id) != int(assigned_store):
+            enforce_store_scoping(role, assigned_store, int(target_store_id))
+        return assigned_store, role
+    elif role == "warehouse_picker":
+        assigned_dc = user_store_id if user_store_id is not None else 1
+        if target_store_id is not None and int(target_store_id) != int(assigned_dc):
+            enforce_store_scoping(role, assigned_dc, int(target_store_id))
+        return assigned_dc, role
+    else:
+        target_int = int(target_store_id) if target_store_id is not None and str(target_store_id).isdigit() else None
+        return target_int, role
 
 
 # -------------------------------------------------------------------------
@@ -1778,6 +1835,11 @@ def api_report_expiry_stock():
     supplier_id = request.args.get("supplier_id", type=int)
     product_id = request.args.get("product_id", type=int)
 
+    # Store Scoping Enforcement
+    store_id_scoped, _ = get_store_scoping(loc_id)
+    if store_id_scoped:
+        loc_id = store_id_scoped
+
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -1818,12 +1880,43 @@ def api_report_transfer_suggestions():
 # -----------------------------------------------------------------------------
 # Code Management (Store Physical Audits)
 # -----------------------------------------------------------------------------
+@app.route("/api/audits", methods=["GET"])
+@require_roles("admin", "category_manager", "store_supervisor", "store_executive")
+def api_list_audits():
+    store_id_scoped, _ = get_store_scoping()
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            query = """
+                SELECT a.audit_id, a.audit_number, a.location_id, l.name AS location_name,
+                       a.status, a.created_by, a.submitted_by, a.approved_by, a.created_at, a.completed_at
+                FROM code_management_audits a
+                JOIN locations l ON a.location_id = l.location_id
+            """
+            params = []
+            if store_id_scoped:
+                query += " WHERE a.location_id = %s"
+                params.append(store_id_scoped)
+            query += " ORDER BY a.created_at DESC"
+            cur.execute(query, params)
+            audits = [
+                {"audit_id": r[0], "audit_number": r[1], "location_id": r[2], "location_name": r[3],
+                 "status": r[4], "created_by": r[5], "submitted_by": r[6], "approved_by": r[7],
+                 "created_at": str(r[8]), "completed_at": str(r[9]) if r[9] else None}
+                for r in cur.fetchall()
+            ]
+            return jsonify({"success": True, "audits": audits})
+    finally:
+        conn.close()
+
+
 @app.route("/api/audits/create", methods=["POST"])
 @require_roles("admin", "store_supervisor")
 def api_create_audit():
     data = request.get_json(silent=True) or {}
-    loc_id = int(data.get("location_id") or 2)
-    user = session.get("username") or "supervisor"
+    store_id_scoped, _ = get_store_scoping(data.get("location_id"))
+    loc_id = store_id_scoped if store_id_scoped else int(data.get("location_id") or 2)
+    user = session.get("username") or request.headers.get("X-User-Name") or "supervisor"
 
     conn = get_connection()
     try:
@@ -1842,7 +1935,7 @@ def api_get_audit(audit_id):
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT a.audit_id, a.audit_number, a.location_id, l.name AS location_name,
-                       a.status, a.created_by, a.approved_by, a.created_at, a.completed_at
+                       a.status, a.created_by, a.approved_by, a.created_at, a.completed_at, a.submitted_by
                 FROM code_management_audits a
                 JOIN locations l ON a.location_id = l.location_id
                 WHERE a.audit_id = %s
@@ -1871,7 +1964,8 @@ def api_get_audit(audit_id):
             audit_data = {
                 "audit_id": row[0], "audit_number": row[1], "location_id": row[2],
                 "location_name": row[3], "status": row[4], "created_by": row[5],
-                "approved_by": row[6], "created_at": str(row[7]), "items": items
+                "approved_by": row[6], "created_at": str(row[7]), "completed_at": str(row[8]) if row[8] else None,
+                "submitted_by": row[9], "items": items
             }
             return jsonify({"success": True, "audit": audit_data})
     finally:
@@ -1879,10 +1973,11 @@ def api_get_audit(audit_id):
 
 
 @app.route("/api/audits/<int:audit_id>/submit", methods=["POST"])
+@require_roles("admin", "store_supervisor", "store_executive")
 def api_submit_audit(audit_id):
     data = request.get_json(silent=True) or {}
     counts = data.get("counts", [])
-    user = session.get("username") or "store_executive"
+    user = session.get("username") or request.headers.get("X-User-Name") or "store_executive"
 
     conn = get_connection()
     try:
@@ -1890,7 +1985,7 @@ def api_submit_audit(audit_id):
             res = submit_code_audit(cur, audit_id, counts, user)
             conn.commit()
             return jsonify({"success": True, "result": res})
-    except PolicyViolationError as e:
+    except (PolicyViolationError, BatchValidationError) as e:
         conn.rollback()
         return jsonify({"success": False, "message": str(e)}), 400
     finally:
@@ -1900,14 +1995,15 @@ def api_submit_audit(audit_id):
 @app.route("/api/audits/<int:audit_id>/approve", methods=["POST"])
 @require_roles("admin", "store_supervisor")
 def api_approve_audit(audit_id):
-    user = session.get("username") or "supervisor"
+    user = session.get("username") or request.headers.get("X-User-Name") or "supervisor"
+    role = session.get("role") or request.headers.get("X-User-Role") or "store_supervisor"
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            res = approve_code_audit(cur, audit_id, user)
+            res = approve_code_audit(cur, audit_id, user, role)
             conn.commit()
             return jsonify({"success": True, "approval": res})
-    except PolicyViolationError as e:
+    except (PolicyViolationError, SegregationOfDutiesError, BatchValidationError) as e:
         conn.rollback()
         return jsonify({"success": False, "message": str(e)}), 400
     finally:
@@ -1920,6 +2016,10 @@ def api_approve_audit(audit_id):
 @app.route("/api/markdowns/suggestions", methods=["GET"])
 def api_markdown_suggestions():
     loc_id = request.args.get("location_id", type=int)
+    store_id_scoped, _ = get_store_scoping(loc_id)
+    if store_id_scoped:
+        loc_id = store_id_scoped
+
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -1929,22 +2029,69 @@ def api_markdown_suggestions():
         conn.close()
 
 
-@app.route("/api/markdowns/approve", methods=["POST"])
-@require_roles("admin", "store_supervisor", "category_manager")
-def api_approve_markdown_endpoint():
+@app.route("/api/markdowns/promotions", methods=["GET"])
+@require_roles("admin", "category_manager", "store_supervisor", "store_executive")
+def api_list_markdown_promotions():
+    store_id_scoped, _ = get_store_scoping()
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            query = """
+                SELECT m.markdown_id, m.promotion_code, m.product_id, p.p_name,
+                       m.batch_id, b.batch_number, b.expiry_date, m.location_id, l.name AS location_name,
+                       m.suggested_discount_percent, m.approved_discount_percent,
+                       m.original_price, m.markdown_price, m.floor_price, m.is_below_floor,
+                       m.status, m.created_by, m.approved_by, m.start_date, m.end_date,
+                       COALESCE(t.units_initially_marked_down, 0) AS initial_units,
+                       COALESCE(t.units_sold, 0) AS units_sold,
+                       COALESCE(t.revenue_generated, 0.0) AS revenue_generated
+                FROM markdown_promotions m
+                JOIN Products p ON m.product_id = p.product_id
+                JOIN batches b ON m.batch_id = b.batch_id
+                JOIN locations l ON m.location_id = l.location_id
+                LEFT JOIN markdown_sales_tracking t ON m.markdown_id = t.markdown_id
+            """
+            params = []
+            if store_id_scoped:
+                query += " WHERE m.location_id = %s"
+                params.append(store_id_scoped)
+            query += " ORDER BY m.created_at DESC"
+            cur.execute(query, params)
+            promos = [
+                {
+                    "markdown_id": r[0], "promotion_code": r[1], "product_id": r[2], "product_name": r[3],
+                    "batch_id": r[4], "batch_number": r[5], "expiry_date": str(r[6]),
+                    "location_id": r[7], "location_name": r[8],
+                    "suggested_discount_percent": float(r[9]), "approved_discount_percent": float(r[10]),
+                    "original_price": float(r[11]), "markdown_price": float(r[12]), "floor_price": float(r[13]),
+                    "is_below_floor": bool(r[14]), "status": r[15], "created_by": r[16], "approved_by": r[17],
+                    "start_date": str(r[18]), "end_date": str(r[19]),
+                    "initial_units": r[20], "units_sold": r[21], "revenue_generated": float(r[22]),
+                    "sell_through_pct": round((r[21] / r[20] * 100), 1) if r[20] > 0 else 0.0
+                }
+                for r in cur.fetchall()
+            ]
+            return jsonify({"success": True, "promotions": promos})
+    finally:
+        conn.close()
+
+
+@app.route("/api/markdowns/propose", methods=["POST"])
+@require_roles("admin", "store_supervisor", "store_executive")
+def api_propose_markdown_endpoint():
     data = request.get_json(silent=True) or {}
-    loc_id = int(data.get("location_id") or 2)
+    store_id_scoped, _ = get_store_scoping(data.get("location_id"))
+    loc_id = store_id_scoped if store_id_scoped else int(data.get("location_id") or 2)
     pid = int(data["product_id"])
     bid = int(data["batch_id"])
-    disc = float(data["approved_discount_percent"])
-    user = session.get("username") or "supervisor"
-    role = session.get("role") or request.headers.get("X-User-Role") or "store_supervisor"
+    disc = float(data["proposed_discount_percent"])
+    user = session.get("username") or request.headers.get("X-User-Name") or "store_executive"
     notes = data.get("notes")
 
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            res = approve_markdown(cur, loc_id, pid, bid, disc, user, role, notes)
+            res = propose_markdown(cur, loc_id, pid, bid, disc, user, notes)
             conn.commit()
             return jsonify({"success": True, "markdown": res}), 201
     except (PolicyViolationError, BatchValidationError) as e:
@@ -1954,20 +2101,58 @@ def api_approve_markdown_endpoint():
         conn.close()
 
 
+@app.route("/api/markdowns/<int:markdown_id>/approve", methods=["POST"])
+@require_roles("admin", "store_supervisor", "category_manager")
+def api_approve_markdown_endpoint(markdown_id):
+    data = request.get_json(silent=True) or {}
+    disc = float(data.get("approved_discount_percent", 0.0))
+    user = session.get("username") or request.headers.get("X-User-Name") or "supervisor"
+    role = session.get("role") or request.headers.get("X-User-Role") or "store_supervisor"
+    notes = data.get("notes")
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            res = approve_markdown(cur, markdown_id, disc, user, role, notes)
+            conn.commit()
+            return jsonify({"success": True, "markdown": res})
+    except (PolicyViolationError, SegregationOfDutiesError, BatchValidationError) as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 400
+    finally:
+        conn.close()
+
+
+@app.route("/api/approvals/pending", methods=["GET"])
+@require_roles("admin", "store_supervisor", "category_manager", "store_executive", "accounts")
+def api_get_pending_approvals():
+    role = session.get("role") or request.headers.get("X-User-Role") or "store_supervisor"
+    username = session.get("username") or request.headers.get("X-User-Name") or "supervisor"
+    store_id, _ = get_store_scoping()
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            inbox = get_pending_approvals(cur, user_role=role, user_store_id=store_id, username=username)
+            return jsonify({"success": True, "inbox": inbox})
+    finally:
+        conn.close()
+
+
 # -----------------------------------------------------------------------------
 # Vendor Expiry Returns, Scrap Ledger, and Debit Notes
 # -----------------------------------------------------------------------------
 @app.route("/api/returns/expiry/create", methods=["POST"])
-@require_roles("admin", "store_supervisor", "category_manager")
+@require_roles("admin", "store_supervisor", "store_executive")
 def api_create_return():
     data = request.get_json(silent=True) or {}
-    loc_id = int(data.get("location_id") or 2)
+    store_id_scoped, _ = get_store_scoping(data.get("location_id"))
+    loc_id = store_id_scoped if store_id_scoped else int(data.get("location_id") or 2)
     sup_id = int(data["supplier_id"])
     pid = int(data["product_id"])
     bid = int(data["batch_id"])
     qty = int(data["quantity"])
     reason = data.get("reason") or "Hit Supplier Expiry Return Window"
-    user = session.get("username") or "supervisor"
+    user = session.get("username") or request.headers.get("X-User-Name") or "store_executive"
 
     conn = get_connection()
     try:
@@ -1975,7 +2160,7 @@ def api_create_return():
             res = create_expiry_return(cur, loc_id, sup_id, pid, bid, qty, user, reason)
             conn.commit()
             return jsonify({"success": True, "return": res}), 201
-    except BatchValidationError as e:
+    except (PolicyViolationError, BatchValidationError) as e:
         conn.rollback()
         return jsonify({"success": False, "message": str(e)}), 400
     finally:
@@ -1983,16 +2168,16 @@ def api_create_return():
 
 
 @app.route("/api/returns/expiry/<int:ret_id>/post", methods=["POST"])
-@require_roles("admin", "store_supervisor", "category_manager")
+@require_roles("admin", "store_supervisor")
 def api_post_return(ret_id):
-    user = session.get("username") or "supervisor"
+    user = session.get("username") or request.headers.get("X-User-Name") or "supervisor"
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             res = post_expiry_return_atomic(cur, ret_id, user)
             conn.commit()
             return jsonify({"success": True, "result": res})
-    except (InsufficientStockError, PolicyViolationError, BatchValidationError) as e:
+    except (InsufficientStockError, PolicyViolationError, SegregationOfDutiesError, BatchValidationError) as e:
         conn.rollback()
         return jsonify({"success": False, "message": str(e)}), 400
     finally:
@@ -2000,27 +2185,38 @@ def api_post_return(ret_id):
 
 
 @app.route("/api/returns/expiry", methods=["GET"])
+@require_roles("admin", "category_manager", "store_supervisor", "store_executive", "accounts")
 def api_list_returns():
+    store_id_scoped, role = get_store_scoping()
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT r.return_id, r.return_number, l.name AS location_name, s.supplier_name,
-                       p.p_name, b.batch_number, r.quantity, r.unit_cost, r.total_claim_amount,
-                       r.status, r.posted_at, r.posted_by, r.created_at
+            query = """
+                SELECT r.return_id, r.return_number, r.location_id, l.name AS location_name,
+                       s.supplier_id, s.supplier_name, p.product_id, p.p_name,
+                       b.batch_id, b.batch_number, b.expiry_date, r.quantity, r.unit_cost,
+                       r.total_claim_amount, r.reason, r.created_by, r.status,
+                       r.posted_at, r.posted_by, r.created_at
                 FROM vendor_expiry_returns r
                 JOIN locations l ON r.location_id = l.location_id
                 JOIN suppliers s ON r.supplier_id = s.supplier_id
                 JOIN Products p ON r.product_id = p.product_id
                 JOIN batches b ON r.batch_id = b.batch_id
-                ORDER BY r.return_id DESC
-            """)
+            """
+            params = []
+            if store_id_scoped and role in ("store_supervisor", "store_executive"):
+                query += " WHERE r.location_id = %s"
+                params.append(store_id_scoped)
+            query += " ORDER BY r.return_id DESC"
+            cur.execute(query, params)
             returns = [
                 {
-                    "return_id": r[0], "return_number": r[1], "location": r[2], "supplier": r[3],
-                    "product_name": r[4], "batch_number": r[5], "quantity": r[6], "unit_cost": float(r[7]),
-                    "total_claim_amount": float(r[8]), "status": r[9],
-                    "posted_at": str(r[10]) if r[10] else None, "posted_by": r[11], "created_at": str(r[12])
+                    "return_id": r[0], "return_number": r[1], "location_id": r[2], "location_name": r[3],
+                    "supplier_id": r[4], "supplier_name": r[5], "product_id": r[6], "product_name": r[7],
+                    "batch_id": r[8], "batch_number": r[9], "expiry_date": str(r[10]),
+                    "quantity": r[11], "unit_cost": float(r[12]), "total_claim_amount": float(r[13]),
+                    "reason": r[14], "created_by": r[15], "status": r[16],
+                    "posted_at": str(r[17]) if r[17] else None, "posted_by": r[18], "created_at": str(r[19])
                 }
                 for r in cur.fetchall()
             ]
@@ -2029,28 +2225,124 @@ def api_list_returns():
         conn.close()
 
 
-@app.route("/api/debit-notes", methods=["GET"])
-def api_list_debit_notes():
+@app.route("/api/returns/scrap-ledger", methods=["GET"])
+@require_roles("admin", "store_supervisor", "category_manager", "accounts", "store_executive")
+def api_get_scrap_ledger():
+    store_id_scoped, _ = get_store_scoping()
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT dn.debit_note_id, dn.debit_note_number, s.supplier_name, dn.issue_date,
-                       dn.taxable_amount, dn.gst_amount, dn.total_amount, dn.status, r.return_number
+            query = """
+                SELECT bs.location_id, l.name AS location_name, bs.product_id, p.p_name, p.category,
+                       bs.batch_id, b.batch_number, b.expiry_date, b.cost_price,
+                       bs.quantity_scrap, (bs.quantity_scrap * b.cost_price) AS scrap_value,
+                       s.supplier_name
+                FROM batch_stock bs
+                JOIN batches b ON bs.batch_id = b.batch_id
+                JOIN Products p ON bs.product_id = p.product_id
+                JOIN locations l ON bs.location_id = l.location_id
+                LEFT JOIN suppliers s ON b.supplier_id = s.supplier_id
+                WHERE bs.quantity_scrap > 0
+            """
+            params = []
+            if store_id_scoped:
+                query += " AND bs.location_id = %s"
+                params.append(store_id_scoped)
+            query += " ORDER BY bs.quantity_scrap DESC"
+            cur.execute(query, params)
+            items = [
+                {
+                    "location_id": r[0], "location_name": r[1], "product_id": r[2], "product_name": r[3],
+                    "category": r[4], "batch_id": r[5], "batch_number": r[6], "expiry_date": str(r[7]),
+                    "cost_price": float(r[8]), "quantity_scrap": r[9], "scrap_value": float(r[10]),
+                    "supplier_name": r[11] or "N/A"
+                }
+                for r in cur.fetchall()
+            ]
+            return jsonify({"success": True, "scrap_ledger": items})
+    finally:
+        conn.close()
+
+
+@app.route("/api/returns/debit-notes", methods=["GET"])
+@app.route("/api/debit-notes", methods=["GET"])
+@require_roles("admin", "accounts", "store_supervisor")
+def api_list_debit_notes():
+    store_id_scoped, role = get_store_scoping()
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            query = """
+                SELECT dn.debit_note_id, dn.debit_note_number, dn.return_id, r.return_number,
+                       r.location_id, l.name AS location_name, s.supplier_id, s.supplier_name,
+                       dn.issue_date, dn.taxable_amount, dn.gst_amount, dn.total_amount,
+                       dn.status, dn.acknowledged_by, dn.acknowledged_at,
+                       dn.settled_by, dn.settled_at, dn.supplier_credit_ref,
+                       p.p_name, b.batch_number, r.quantity
                 FROM debit_notes dn
                 JOIN suppliers s ON dn.supplier_id = s.supplier_id
                 JOIN vendor_expiry_returns r ON dn.return_id = r.return_id
-                ORDER BY dn.debit_note_id DESC
-            """)
+                JOIN locations l ON r.location_id = l.location_id
+                JOIN Products p ON r.product_id = p.product_id
+                JOIN batches b ON r.batch_id = b.batch_id
+            """
+            params = []
+            if store_id_scoped and role == "store_supervisor":
+                query += " WHERE r.location_id = %s"
+                params.append(store_id_scoped)
+            query += " ORDER BY dn.debit_note_id DESC"
+            cur.execute(query, params)
             notes = [
                 {
-                    "debit_note_id": r[0], "debit_note_number": r[1], "supplier_name": r[2],
-                    "issue_date": str(r[3]), "taxable_amount": float(r[4]), "gst_amount": float(r[5]),
-                    "total_amount": float(r[6]), "status": r[7], "return_number": r[8]
+                    "debit_note_id": r[0], "debit_note_number": r[1], "return_id": r[2], "return_number": r[3],
+                    "location_id": r[4], "location_name": r[5], "supplier_id": r[6], "supplier_name": r[7],
+                    "issue_date": str(r[8]), "taxable_amount": float(r[9]), "gst_amount": float(r[10]),
+                    "total_amount": float(r[11]), "status": r[12],
+                    "acknowledged_by": r[13], "acknowledged_at": str(r[14]) if r[14] else None,
+                    "settled_by": r[15], "settled_at": str(r[16]) if r[16] else None,
+                    "supplier_credit_ref": r[17], "product_name": r[18], "batch_number": r[19], "quantity": r[20]
                 }
                 for r in cur.fetchall()
             ]
             return jsonify({"success": True, "debit_notes": notes})
+    finally:
+        conn.close()
+
+
+@app.route("/api/finance/debit-notes/<int:dn_id>/acknowledge", methods=["POST"])
+@require_roles("admin", "accounts")
+def api_acknowledge_debit_note(dn_id):
+    user = session.get("username") or request.headers.get("X-User-Name") or "accounts_officer"
+    role = session.get("role") or request.headers.get("X-User-Role") or "accounts"
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            res = acknowledge_debit_note(cur, dn_id, user, role)
+            conn.commit()
+            return jsonify({"success": True, "result": res})
+    except (PolicyViolationError, BatchValidationError) as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 400
+    finally:
+        conn.close()
+
+
+@app.route("/api/finance/debit-notes/<int:dn_id>/settle", methods=["POST"])
+@require_roles("admin", "accounts")
+def api_settle_debit_note(dn_id):
+    data = request.get_json(silent=True) or {}
+    user = session.get("username") or request.headers.get("X-User-Name") or "accounts_officer"
+    role = session.get("role") or request.headers.get("X-User-Role") or "accounts"
+    credit_ref = data.get("supplier_credit_ref")
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            res = settle_debit_note(cur, dn_id, user, role, credit_ref)
+            conn.commit()
+            return jsonify({"success": True, "result": res})
+    except (PolicyViolationError, BatchValidationError) as e:
+        conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 400
     finally:
         conn.close()
 

@@ -283,6 +283,130 @@ export default function Sidebar({ isOpen, onClose }) {
                       <span>FEFO Pick List</span>
                     </NavLink>
                   )}
+                  {(isAdmin || role === "category_manager" || role === "store_supervisor" || role === "store_executive") && (
+                    <NavLink
+                      to="/reports/expiry"
+                      onClick={handleLinkClick}
+                      className={({ isActive }) =>
+                        `sidebar-nav-item ${isActive ? "active" : ""}`
+                      }
+                    >
+                      <i className="fa-solid fa-calendar-xmark" />
+                      <span>Expiry Stock Report</span>
+                    </NavLink>
+                  )}
+                  {(isAdmin || role === "category_manager" || role === "store_supervisor") && (
+                    <NavLink
+                      to="/reports/transfers"
+                      onClick={handleLinkClick}
+                      className={({ isActive }) =>
+                        `sidebar-nav-item ${isActive ? "active" : ""}`
+                      }
+                    >
+                      <i className="fa-solid fa-shuffle" />
+                      <span>Transfer Advice</span>
+                    </NavLink>
+                  )}
+                </>
+              )}
+
+              {/* Phase 4 Store Operations */}
+              {(isAdmin || role === "store_supervisor" || role === "store_executive" || role === "category_manager") && (
+                <>
+                  <div
+                    className="sidebar-section-label"
+                    style={{ marginTop: "0.85rem" }}
+                  >
+                    Store Operations
+                  </div>
+                  {(isAdmin || role === "store_supervisor" || role === "store_executive") && (
+                    <NavLink
+                      to="/audits/code-management"
+                      onClick={handleLinkClick}
+                      className={({ isActive }) =>
+                        `sidebar-nav-item ${isActive ? "active" : ""}`
+                      }
+                    >
+                      <i className="fa-solid fa-clipboard-check" />
+                      <span>Code Audits</span>
+                    </NavLink>
+                  )}
+                  <NavLink
+                    to="/markdowns/promotions"
+                    onClick={handleLinkClick}
+                    className={({ isActive }) =>
+                      `sidebar-nav-item ${isActive ? "active" : ""}`
+                    }
+                  >
+                    <i className="fa-solid fa-tags" />
+                    <span>Markdowns &amp; Push</span>
+                  </NavLink>
+
+                  <NavLink
+                    to="/returns/expiry"
+                    onClick={handleLinkClick}
+                    className={({ isActive }) =>
+                      `sidebar-nav-item ${isActive ? "active" : ""}`
+                    }
+                  >
+                    <i className="fa-solid fa-arrow-rotate-left" />
+                    <span>Expiry Returns</span>
+                  </NavLink>
+
+                  <NavLink
+                    to="/returns/scrap-ledger"
+                    onClick={handleLinkClick}
+                    className={({ isActive }) =>
+                      `sidebar-nav-item ${isActive ? "active" : ""}`
+                    }
+                  >
+                    <i className="fa-solid fa-dumpster" />
+                    <span>Scrap Ledger</span>
+                  </NavLink>
+                </>
+              )}
+
+              {/* Finance & Control */}
+              {(isAdmin || role === "accounts" || role === "store_supervisor") && (
+                <>
+                  <div
+                    className="sidebar-section-label"
+                    style={{ marginTop: "0.85rem" }}
+                  >
+                    Finance &amp; Control
+                  </div>
+                  <NavLink
+                    to="/finance/debit-notes"
+                    onClick={handleLinkClick}
+                    className={({ isActive }) =>
+                      `sidebar-nav-item ${isActive ? "active" : ""}`
+                    }
+                  >
+                    <i className="fa-solid fa-file-invoice-dollar" />
+                    <span>Debit Notes</span>
+                  </NavLink>
+                </>
+              )}
+
+              {/* Governance & Approvals */}
+              {(isAdmin || role === "store_supervisor" || role === "category_manager" || role === "store_executive" || role === "accounts") && (
+                <>
+                  <div
+                    className="sidebar-section-label"
+                    style={{ marginTop: "0.85rem" }}
+                  >
+                    Governance &amp; Approvals
+                  </div>
+                  <NavLink
+                    to="/governance/approvals"
+                    onClick={handleLinkClick}
+                    className={({ isActive }) =>
+                      `sidebar-nav-item ${isActive ? "active" : ""}`
+                    }
+                  >
+                    <i className="fa-solid fa-inbox" />
+                    <span>Approvals Inbox</span>
+                  </NavLink>
                 </>
               )}
 
